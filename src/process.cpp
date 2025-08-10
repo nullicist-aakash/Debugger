@@ -1,5 +1,6 @@
 #include <libsdb/process.hpp>
 #include <libsdb/error.hpp>
+#include <libsdb/pipe.hpp>
 #include <sys/types.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
@@ -21,26 +22,40 @@ sdb::stop_reason::stop_reason(int wait_status) {
     }
 }
 
-std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& path) {
+std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& path, bool debug) {
     pid_t pid;
+    pipe channel(true);
+
     if ((pid = fork()) < 0)
         error::send_errno("fork failed");
 
     // If child process, prepare itself for PTRACE before exec, so that it never
     // starts running, and we can do something in debugger before executing it.
     if (pid == 0) {
-        // TODO: Signal parent that the child didn't run.
-        if (ptrace(PTRACE_TRACEME, pid, nullptr, nullptr) < 0)
-            error::send_errno("tracing failed");
+        channel.close_read();
+
+        if (debug && ptrace(PTRACE_TRACEME, pid, nullptr, nullptr) < 0)
+            error::exit_with_errno(channel, "Tracing failed");
 
         if (execlp(path.c_str(), path.c_str(), nullptr) < 0) {
-            error::send_errno("exec failed");
+            error::exit_with_errno(channel, "exec failed");
         }
     }
 
     // Since we started this process, we want to terminate it on debugger end.
-    std::unique_ptr<process> _process(new process(pid, true));
-    _process->wait_on_signal();
+    std::unique_ptr<process> _process(new process(pid, true, debug));
+    if (debug)
+        _process->wait_on_signal();
+
+    channel.close_write();
+    auto data = channel.read();
+    channel.close_read();
+
+    if (!data.empty()) {
+        auto chars = reinterpret_cast<char*>(data.data());
+        error::send(std::string{chars, chars + data.size()});;
+    }
+
     return _process;
 }
 
@@ -52,7 +67,7 @@ std::unique_ptr<sdb::process> sdb::process::attach(pid_t pid) {
         error::send_errno("Could not attach");
 
     // The process is already running. So on termination, we should not kill it
-    std::unique_ptr<process> _process(new process(pid, false));
+    std::unique_ptr<process> _process(new process(pid, false, true));
     _process->wait_on_signal();
     return _process;
 }
@@ -79,12 +94,18 @@ sdb::process::~process() {
     if (m_pid == 0)
         return;
 
-    if (m_state == process_state::RUNNING) {
-        kill(m_pid, SIGSTOP);
-        waitpid(m_pid, nullptr, 0);
-    }
+    if (m_is_attached) {
+        // Detach the process
+        if (m_state == process_state::RUNNING) {
+            // Before PTRACE_DETACH, we need the process to stop.
+            kill(m_pid, SIGSTOP);
+            waitpid(m_pid, nullptr, 0);
+        }
 
-    ptrace(PTRACE_DETACH, m_pid, nullptr, nullptr);
+        ptrace(PTRACE_DETACH, m_pid, nullptr, nullptr);
+        // Continue the process after detach
+        kill(m_pid, SIGCONT);
+    }
 
     if (m_terminate_on_end) {
         kill(m_pid, SIGKILL);

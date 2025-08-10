@@ -69,9 +69,10 @@ namespace sdb {
          * Helps in the launch of a new process based on the program path and no arguments. When the method returns,
          * the process will not be running.
          * @param path The path to the program that we want to launch.
+         * @param debug If true, we will also attach to the child process. Otherwise, nothing special is done to the child process.
          * @return The instance of `process` class.
          */
-        static std::unique_ptr<process> launch(const std::filesystem::path& path);
+        static std::unique_ptr<process> launch(const std::filesystem::path& path, bool debug = true);
 
         /**
          * Helps in the attachment of debugger to already running process. When the method returns,
@@ -108,17 +109,23 @@ namespace sdb {
          * Private constructor to be used by static builders.
          * @param pid PID of the process.
          * @param terminate_on_end If true, we will terminate the process in self's destructor.
+         * @param is_attached If true, it means that we are attached to the process.
          */
-        process(pid_t pid, bool terminate_on_end) : m_pid(pid), m_terminate_on_end(terminate_on_end) {}
+        process(pid_t pid, bool terminate_on_end, bool is_attached) : m_pid(pid), m_terminate_on_end(terminate_on_end), m_is_attached(is_attached) {}
 
         /**
          * PID of the process.
          */
-        const pid_t m_pid = 0;
+        const pid_t m_pid;
         /**
          * If true, we will terminate the process with PID `m_pid` in destructor.
          */
-        const bool m_terminate_on_end = true;
+        const bool m_terminate_on_end;
+        /**
+         * If true, it means that we are attached to the process.
+         */
+        const bool m_is_attached;
+
         /**
          * Represents the current state of the process.
          */

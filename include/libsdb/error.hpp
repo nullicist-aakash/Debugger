@@ -2,6 +2,7 @@
 #include <cstring>
 #include <string>
 #include <stdexcept>
+#include <libsdb/pipe.hpp>
 
 namespace sdb {
     /**
@@ -24,6 +25,23 @@ namespace sdb {
          */
         [[noreturn]] static void send_errno(const std::string& prefix) {
             throw error(prefix + ": " + std::strerror(errno));
+        }
+
+        /**
+         * Writes the exception message to the pipe and exits via `exit(-1)`.
+         * @param channel Pipe where the exception message will be stored.
+         * @param prefix Prefix string to use for an errno error description.
+         */
+        [[noreturn]] static void exit_with_errno(sdb::pipe& channel, const std::string& prefix) {
+            auto message = prefix + ": " + std::strerror(errno);
+
+            std::span byte_span{
+                reinterpret_cast<std::byte*>(message.data()),
+                message.size()
+            };
+
+            channel.write(byte_span);
+            exit(-1);
         }
 
     private:

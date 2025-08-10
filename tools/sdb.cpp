@@ -63,7 +63,7 @@ namespace {
         return sdb::process::launch(args[0]);
     }
 
-    void handle_command(const std::unique_ptr<sdb::process>& process, std::string_view line) {
+    bool handle_command(const std::unique_ptr<sdb::process>& process, std::string_view line) {
         const auto args = split(line, ' ');
         const auto& command = args[0];
 
@@ -71,13 +71,19 @@ namespace {
             process->resume();
             auto reason = process->wait_on_signal();
             print_stop_reason(*process, reason);
-        } else {
-            std::println("Unknown command: {}", command);
+            return true;
         }
+
+        if (is_prefix(command, "exit"))
+            return false;
+
+        std::println("Unknown command: {}", command);
+        return true;
     }
 
     void main_loop(const std::unique_ptr<sdb::process> &process) {
         char* line = nullptr;
+        std::println("Started process {} ", process->pid());
 
         while ((line = readline("sdb> ")) != nullptr) {
             std::string line_str;
@@ -94,7 +100,8 @@ namespace {
                 continue;
 
             try {
-                handle_command(process, line_str);
+                if (!handle_command(process, line_str))
+                    return;
             } catch (const sdb::error& e) {
                 std::println("{}", e.what());
             }
