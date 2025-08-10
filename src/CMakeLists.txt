@@ -1,4 +1,4 @@
-add_library(libsdb lidsdb.cpp)
+add_library(libsdb process.cpp)
 add_library(sdb::libsdb ALIAS libsdb)
 
 set_target_properties(
@@ -6,7 +6,7 @@ set_target_properties(
         PROPERTIES OUTPUT_NAME sdb
 )
 
-target_compile_features(libsdb PUBLIC cxx_std_17)
+target_compile_features(libsdb PUBLIC cxx_std_23)
 
 target_include_directories(
         libsdb
