@@ -67,7 +67,7 @@ namespace sdb {
 
         /**
          * Helps in the launch of a new process based on the program path and no arguments. When the method returns,
-         * the process will not be running.
+         * the process will not be running iff debug = true.
          * @param path The path to the program that we want to launch.
          * @param debug If true, we will also attach to the child process. Otherwise, nothing special is done to the child process.
          * @return The instance of `process` class.
