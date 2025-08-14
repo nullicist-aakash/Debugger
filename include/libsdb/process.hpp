@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <memory>
 #include <sys/types.h>
+#include <libsdb/registers.hpp>
 
 namespace sdb {
     /**
@@ -94,6 +95,32 @@ namespace sdb {
         void resume();
 
         /**
+         * Fetches the set of registers associated with the current process.
+         * @param self Instance of self.
+         * @return The set of registers associated with current process.
+         */
+        registers& get_registers(this auto&& self) { return self.m_registers; }
+
+        /**
+         * Writes 8 byte data to specified user's struct offset.
+         * @param offset user struct's offset to write the data to.
+         * @param data The data to write.
+         */
+        void write_user_struct(std::size_t offset, std::uint64_t data);
+
+        /**
+         * Bulk writer for general purpose registers.
+         * @param gprs General purpose registers to bulk write.
+         */
+        void write_gprs(const user_regs_struct& gprs);
+
+        /**
+         * Bilk writer for floating point registers.
+         * @param fprs Floating points registers to bulk write.
+         */
+        void write_fprs(const user_fpregs_struct& fprs);
+
+        /**
          * Fetches the PID of the process.
          * @return PID of the process.
          */
@@ -111,7 +138,16 @@ namespace sdb {
          * @param terminate_on_end If true, we will terminate the process in self's destructor.
          * @param is_attached If true, it means that we are attached to the process.
          */
-        process(pid_t pid, bool terminate_on_end, bool is_attached) : m_pid(pid), m_terminate_on_end(terminate_on_end), m_is_attached(is_attached) {}
+        process(pid_t pid, bool terminate_on_end, bool is_attached) :
+            m_pid(pid), m_terminate_on_end(terminate_on_end), m_is_attached(is_attached),
+            m_registers(new registers(*this)) {
+
+        }
+
+        /**
+         * Helper method to update local copy of all the registers of a process.
+         */
+        void read_all_registers();
 
         /**
          * PID of the process.
@@ -125,10 +161,13 @@ namespace sdb {
          * If true, it means that we are attached to the process.
          */
         const bool m_is_attached;
-
         /**
          * Represents the current state of the process.
          */
         process_state m_state = process_state::STOPPED;
+        /**
+         * Process specific registers.
+         */
+        std::unique_ptr<registers> m_registers;
     };
 }

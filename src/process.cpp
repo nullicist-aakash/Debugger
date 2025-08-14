@@ -87,6 +87,10 @@ sdb::stop_reason sdb::process::wait_on_signal() {
 
     const auto reason = stop_reason(status);
     this->m_state = reason.reason;
+
+    if (m_is_attached && this->m_state == process_state::STOPPED)
+        read_all_registers();
+
     return reason;
 }
 
@@ -110,5 +114,46 @@ sdb::process::~process() {
     if (m_terminate_on_end) {
         kill(m_pid, SIGKILL);
         waitpid(m_pid, nullptr, 0);
+    }
+}
+
+
+void sdb::process::read_all_registers() {
+    if (ptrace(PTRACE_GETREGS, m_pid, nullptr, &get_registers().m_data.regs) < 0)
+        error::send_errno("Could not read GPR registers");
+
+    if (ptrace(PTRACE_GETFPREGS, m_pid, nullptr, &get_registers().m_data.i387) < 0)
+        error::send_errno("Could not read FPR registers");
+
+    for (int i = 0; i < 8; ++i) {
+        auto id = static_cast<int>(register_id::dr0) + i;
+        auto info = register_info_by_id(static_cast<register_id>(id));
+
+        errno = 0;
+        std::int64_t data = ptrace(PTRACE_PEEKUSER, m_pid, info.offset, nullptr);
+        if (errno != 0)
+            error::send_errno("Could not read debug registers");
+        get_registers().m_data.u_debugreg[i] = data;
+    }
+}
+
+
+void sdb::process::write_user_struct(std::size_t offset, std::uint64_t data) {
+    if (ptrace(PTRACE_POKEUSER, m_pid, offset, data) < 0) {
+        error::send_errno("Could not write to user struct");
+    }
+}
+
+
+void sdb::process::write_gprs(const user_regs_struct& gprs) {
+    if (ptrace(PTRACE_SETREGS, m_pid, nullptr, &gprs) < 0) {
+        error::send_errno("Could not set GPR registers");
+    }
+}
+
+
+void sdb::process::write_fprs(const user_fpregs_struct& fprs) {
+    if (ptrace(PTRACE_SETFPREGS, m_pid, nullptr, &fprs) < 0) {
+        error::send_errno("Could not set GPR registers");
     }
 }
