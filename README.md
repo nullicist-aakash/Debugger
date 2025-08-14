@@ -4,6 +4,4 @@ I am referring to this [Book](https://nostarch.com/building-a-debugger). With th
 
 The expected time to complete the debugger is before the end of Dceember 2025.
 
-After this project, I will take [Computer, Enhance!](https://www.computerenhance.com/p/table-of-contents) course by Casey Muratori, and get specific knowledge about performance optimizations.
-
 The final goal is to land a job in low latency development role, where I specialize in performance optimizations of trading systems.
