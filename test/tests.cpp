@@ -87,4 +87,33 @@ TEST_CASE("Write register works", "[register]") {
 
     auto output = channel.read();
     REQUIRE(sdb::to_string_view(output) == "0xcafecafe");
+
+    regs.write_by_id(sdb::register_id::mm0, 0xba5eba11);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    output = channel.read();
+    REQUIRE(sdb::to_string_view(output) == "0xba5eba11");
+
+    regs.write_by_id(sdb::register_id::xmm0, 42.42);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    output = channel.read();
+    REQUIRE(sdb::to_string_view(output) == "42.42");
+
+    // Write to floating point stack
+    regs.write_by_id(sdb::register_id::st0, 42.42l);
+    // Set the size of stack to 1
+    regs.write_by_id(sdb::register_id::fsw, std::uint16_t(0b0011'1000'0000'0000));
+    // Set the tag to specify that st0 contains some value
+    regs.write_by_id(sdb::register_id::ftw, std::uint16_t(0b0011'1111'1111'1111));
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    output = channel.read();
+    REQUIRE(sdb::to_string_view(output) == "42.42");
 }
