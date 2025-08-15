@@ -34,10 +34,9 @@ namespace {
             }
         }
 
-        return to_bytes128(t);
+        return sdb::to_byte128(t);
     }
 }
-
 
 sdb::registers::value sdb::registers::read(const register_info &info) const {
     auto bytes = to_bytes(m_data) + info.offset;

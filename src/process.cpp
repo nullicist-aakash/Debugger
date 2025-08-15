@@ -22,7 +22,7 @@ sdb::stop_reason::stop_reason(int wait_status) {
     }
 }
 
-std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& path, bool debug) {
+std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& path, bool debug, std::optional<int> stdout_replacement) {
     pid_t pid;
     pipe channel(true);
 
@@ -33,6 +33,10 @@ std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& 
     // starts running, and we can do something in debugger before executing it.
     if (pid == 0) {
         channel.close_read();
+
+        if (stdout_replacement)
+            if (dup2(*stdout_replacement, STDOUT_FILENO) < 0)
+                error::exit_with_errno(channel, "stdout replacement failed");
 
         if (debug && ptrace(PTRACE_TRACEME, pid, nullptr, nullptr) < 0)
             error::exit_with_errno(channel, "Tracing failed");

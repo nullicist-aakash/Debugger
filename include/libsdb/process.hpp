@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <memory>
 #include <sys/types.h>
 #include <libsdb/registers.hpp>
+
 
 namespace sdb {
     /**
@@ -71,9 +73,10 @@ namespace sdb {
          * the process will not be running iff debug = true.
          * @param path The path to the program that we want to launch.
          * @param debug If true, we will also attach to the child process. Otherwise, nothing special is done to the child process.
+         * @param stdout_replacement If passed as non-empty value, redirect the stdout of the child process to this fd in current process.
          * @return The instance of `process` class.
          */
-        static std::unique_ptr<process> launch(const std::filesystem::path& path, bool debug = true);
+        static std::unique_ptr<process> launch(const std::filesystem::path& path, bool debug = true, std::optional<int> stdout_replacement = std::nullopt);
 
         /**
          * Helps in the attachment of debugger to already running process. When the method returns,
@@ -99,7 +102,7 @@ namespace sdb {
          * @param self Instance of self.
          * @return The set of registers associated with current process.
          */
-        registers& get_registers(this auto&& self) { return self.m_registers; }
+        registers& get_registers(this auto&& self) { return *self.m_registers; }
 
         /**
          * Writes 8 byte data to specified user's struct offset.

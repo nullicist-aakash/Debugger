@@ -2,10 +2,17 @@
 
 #include <cstring>
 #include <cstddef>
+#include <vector>
+#include <span>
+#include <string_view>
 
 #include <libsdb/types.hpp>
 
 namespace sdb {
+    inline std::string_view to_string_view(std::span<std::byte> data) {
+        return { reinterpret_cast<char*>(data.data()), data.size() };
+    }
+
     /**
      * Converts the bytes to the target type.
      * @tparam To The target type for the bytes.
