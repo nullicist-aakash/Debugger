@@ -117,3 +117,33 @@ TEST_CASE("Write register works", "[register]") {
     output = channel.read();
     REQUIRE(sdb::to_string_view(output) == "42.42");
 }
+
+TEST_CASE("Read register works", "[register]") {
+    auto proc = sdb::process::launch("targets/reg_read");
+    auto& regs = proc->get_registers();
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    REQUIRE(regs.read_by_id_as<std::uint64_t>(sdb::register_id::r13) == 0xcafecafe);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    REQUIRE(regs.read_by_id_as<std::uint8_t>(sdb::register_id::r13b) == 42);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    REQUIRE(regs.read_by_id_as<sdb::byte64>(sdb::register_id::mm0) == sdb::to_byte64(0xba5eba11ull));
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    REQUIRE(regs.read_by_id_as<sdb::byte128>(sdb::register_id::xmm0) == sdb::to_byte128(64.125));
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    REQUIRE(regs.read_by_id_as<long double>(sdb::register_id::st0) == 64.125L);
+}
