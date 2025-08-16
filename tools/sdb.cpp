@@ -5,7 +5,10 @@
 #include <string_view>
 #include <editline/readline.h>
 #include <libsdb/process.hpp>
+#include <libsdb/parse.hpp>
 #include <libsdb/error.hpp>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 using namespace std::string_view_literals;
 
@@ -56,6 +59,129 @@ namespace {
         }
     }
 
+    void print_help(const std::vector<std::string>& args) {
+        if (args.size() == 1) {
+            std::cout << R"(Available commands:
+continue - Resume the process
+register - Commands for operating on registers
+help     - Display the help panel
+exit     - Exits the debugger
+)";
+        }
+        else if (is_prefix(args[1], "register")) {
+            std::cout << R"(Available commands:
+            read
+            read <register>
+            read all
+            write <register> <value>
+)";
+        }
+        else {
+            std::cout << "No help available on that\n";
+        }
+    }
+
+    void handle_register_read(sdb::process& process, const std::vector<std::string>& args) {
+        auto format = [](const auto& t) {
+            using T = std::decay_t<decltype(t)>;
+
+            if constexpr (std::is_floating_point_v<T>) {
+                return std::format("{}", t);
+            }
+            else if constexpr (std::is_integral_v<T>) {
+                return std::format("{:#0{}x}", t, sizeof(T) * 2 + 2);  // Integer → hex with "0x" prefix, padded width
+            }
+            else {
+                return fmt::format("[{:#04x}]", fmt::join(t, ","));
+            }
+        };
+
+        if (args.size() == 2 or (args.size() == 3 and args[2] == "all")) {
+            for (auto& info : sdb::g_register_infos) {
+                if (const auto should_print = (args.size() == 3 or info.type == sdb::register_type::gpr) and info.name != "orig_rax"; !should_print)
+                    continue;
+
+                auto value = process.get_registers().read(info);
+                std::println("{:10}:\t{}", info.name, std::visit(format, value));
+            }
+        }
+        else if (args.size() == 3) {
+            try {
+                auto info = sdb::register_info_by_name(args[2]);
+                auto value = process.get_registers().read(info);
+                std::println("{}:\t{}", info.name, std::visit(format, value));
+            }
+            catch (sdb::error& err) {
+                std::cerr << "No such register\n";
+            }
+        }
+        else {
+            print_help({ "help", "register" });
+        }
+    }
+
+    sdb::registers::value parse_register_value(sdb::register_info info, std::string_view text) {
+        try {
+            if (info.format == sdb::register_format::uint) {
+                switch (info.size) {
+                    case 1: return sdb::to_integral<std::uint8_t>(text, 16).value();
+                    case 2: return sdb::to_integral<std::uint16_t>(text, 16).value();
+                    case 4: return sdb::to_integral<std::uint32_t>(text, 16).value();
+                    case 8: return sdb::to_integral<std::uint64_t>(text, 16).value();
+                }
+            }
+            else if (info.format == sdb::register_format::double_float) {
+                return sdb::to_float<double>(text).value();
+            }
+            else if (info.format == sdb::register_format::long_double) {
+                return sdb::to_float<long double>(text).value();
+            }
+            else if (info.format == sdb::register_format::vector) {
+                if (info.size == 8) {
+                    return sdb::parse_vector<8>(text);
+                }
+                else if (info.size == 16) {
+                    return sdb::parse_vector<16>(text);
+                }
+            }
+        } catch (...) {
+
+        }
+
+        sdb::error::send("Invalid format");
+    }
+
+    void handle_register_write(sdb::process& process, const std::vector<std::string>& args) {
+        if (args.size() != 4) {
+            print_help({ "help", "register" });
+            return;
+        }
+
+        try {
+            auto info = sdb::register_info_by_name(args[2]);
+            auto value = parse_register_value(info, args[3]);
+            process.get_registers().write(info, value);
+        }
+        catch (sdb::error& err) {
+            std::cerr << err.what() << '\n';
+            return;
+        }
+    }
+
+    void handle_register_command(sdb::process& process, const std::vector<std::string>& args) {
+        if (args.size() < 2) {
+            print_help({ "help", "register" });
+            return;
+        }
+
+        if (is_prefix(args[1], "read"))
+            handle_register_read(process, args);
+        else if (is_prefix(args[1], "write"))
+            handle_register_write(process, args);
+        else
+            print_help({ "help", "register" });
+    }
+
     std::unique_ptr<sdb::process> attach(const std::vector<std::string>& args) {
         if (args[0] == "-p")
             return sdb::process::attach(std::stoi(args[1]));
@@ -73,7 +199,14 @@ namespace {
             print_stop_reason(*process, reason);
             return true;
         }
-
+        else if (is_prefix(command, "help")) {
+            print_help(args);
+            return true;
+        }
+        else if (is_prefix(command, "register")) {
+            handle_register_command(*process, args);
+            return true;
+        }
         if (is_prefix(command, "exit"))
             return false;
 
@@ -110,8 +243,12 @@ namespace {
 }
 
 int main(int argc, const char** argv) {
+    std::vector<std::string> arr(argc);
+    for (int i = 0; i < argc; ++i)
+        arr[i] = std::string{ argv[i] };
+
     try {
-        main_loop(attach({"ls"}));
+        main_loop(attach(arr));
     } catch (const sdb::error& e) {
         std::println("{}", e.what());
     }

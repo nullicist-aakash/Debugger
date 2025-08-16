@@ -78,6 +78,6 @@ void sdb::registers::write(const register_info &info, const value &val) {
         // Trick to use to write AH, BH, CH, DH registers, as the ptrace API needs an 8-byte aligned address
         auto aligned_offset =  info.offset & ~0b111;
         // I am not sure if bytes + aligned_offset can overflow?
-        m_proc->write_user_struct(info.offset, from_bytes_to<std::uint64_t>(bytes + aligned_offset));
+        m_proc->write_user_struct(aligned_offset, from_bytes_to<std::uint64_t>(bytes + aligned_offset));
     }
 }
