@@ -161,3 +161,10 @@ void sdb::process::write_fprs(const user_fpregs_struct& fprs) {
         error::send_errno("Could not set GPR registers");
     }
 }
+
+sdb::breakpoint_site &sdb::process::create_breakpoint_site(const virt_addr& address) {
+    if (m_breakpoints.contains_address(address))
+        error::send(std::format("Breakpoint site already created at address {}", std::to_string(address.addr())));
+
+    return m_breakpoints.push(std::make_unique<breakpoint_site>(*this, address));
+}

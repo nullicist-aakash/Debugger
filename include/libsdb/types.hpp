@@ -8,53 +8,53 @@ namespace sdb {
 
     class virt_addr {
     public:
-        virt_addr() = default;
+        constexpr virt_addr() = default;
 
-        explicit virt_addr(std::uint64_t addr) : addr_(addr) {}
+        explicit constexpr virt_addr(std::uint64_t addr) : addr_(addr) {}
 
-        [[nodiscard]] std::uint64_t addr() const {
+        [[nodiscard]] constexpr std::uint64_t addr() const noexcept {
             return addr_;
         }
 
-        virt_addr operator+(std::int64_t offset) const {
+        constexpr virt_addr operator+(std::int64_t offset) const noexcept {
             return virt_addr(addr_ + offset);
         }
 
-        virt_addr operator-(std::int64_t offset) const {
+        constexpr virt_addr operator-(std::int64_t offset) const noexcept {
             return virt_addr(addr_ - offset);
         }
 
-        virt_addr& operator+=(std::int64_t offset) {
+        constexpr virt_addr& operator+=(std::int64_t offset) noexcept {
             addr_ += offset;
             return *this;
         }
 
-        virt_addr& operator-=(std::int64_t offset) {
+        constexpr virt_addr& operator-=(std::int64_t offset) noexcept {
             addr_ -= offset;
             return *this;
         }
 
-        bool operator==(const virt_addr& other) const {
+        constexpr bool operator==(const virt_addr& other) const noexcept {
             return addr_ == other.addr_;
         }
 
-        bool operator!=(const virt_addr& other) const {
+        constexpr bool operator!=(const virt_addr& other) const noexcept {
             return addr_ != other.addr_;
         }
 
-        bool operator<(const virt_addr& other) const {
+        constexpr bool operator<(const virt_addr& other) const noexcept {
             return addr_ < other.addr_;
         }
 
-        bool operator<=(const virt_addr& other) const {
+        constexpr bool operator<=(const virt_addr& other) const noexcept {
             return addr_ <= other.addr_;
         }
 
-        bool operator>(const virt_addr& other) const {
+        constexpr bool operator>(const virt_addr& other) const noexcept {
             return addr_ > other.addr_;
         }
 
-        bool operator>=(const virt_addr& other) const {
+        constexpr bool operator>=(const virt_addr& other) const noexcept {
             return addr_ >= other.addr_;
         }
 

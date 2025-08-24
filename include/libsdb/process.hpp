@@ -6,6 +6,8 @@
 #include <memory>
 #include <sys/types.h>
 #include <libsdb/registers.hpp>
+#include <libsdb/breakpoint_site.hpp>
+#include <libsdb/stoppoint_collection.hpp>
 
 
 namespace sdb {
@@ -124,6 +126,18 @@ namespace sdb {
         void write_fprs(const user_fpregs_struct& fprs);
 
         /**
+         * Helper method to create a breakpoint. Throws error in case breakpoint already exists at given address.
+         * @param address Assembly address at which we need to create a breakpoint.
+         * @return The object instance of the breakpoint.
+         */
+        breakpoint_site& create_breakpoint_site(const virt_addr& address);
+
+        template <typename Self>
+        auto& breakpoint_sites(this Self&& self) {
+            return std::forward<Self>(self).m_breakpoint_sites;
+        }
+
+        /**
          * Fetches the PID of the process.
          * @return PID of the process.
          */
@@ -172,5 +186,10 @@ namespace sdb {
          * Process specific registers.
          */
         std::unique_ptr<registers> m_registers;
+
+        /**
+         * List of all breakpoints, enabled or disabled.
+         */
+        stoppoint_collection<breakpoint_site> m_breakpoints;
     };
 }
