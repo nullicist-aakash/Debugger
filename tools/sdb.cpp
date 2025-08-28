@@ -2,8 +2,8 @@
 #include <sstream>
 #include <vector>
 #include <print>
+#include <stack>
 #include <string_view>
-#include <editline/readline.h>
 #include <libsdb/process.hpp>
 #include <libsdb/parse.hpp>
 #include <libsdb/error.hpp>
@@ -40,18 +40,18 @@ namespace {
 
 namespace {
     void print_stop_reason(const sdb::process& process, const sdb::stop_reason& reason) {
-        std::print("Process {} ", process.pid());
+        std::print(std::cerr, "Process {} ", process.pid());
         switch (reason.reason) {
             case sdb::process_state::STOPPED:
-                std::println("stopped with signal {}", sigabbrev_np(reason.info));
+                std::println(std::cerr, "stopped with signal {} at {:#x}", sigabbrev_np(reason.info), process.get_pc().addr());
                 break;
 
             case sdb::process_state::TERMINATED:
-                std::println("terminated with signal {}", sigabbrev_np(reason.info));
+                std::println(std::cerr, "terminated with signal {}", sigabbrev_np(reason.info));
                 break;
 
             case sdb::process_state::EXITED:
-                std::println("exited with exit status {}", reason.info);
+                std::println(std::cerr, "exited with exit status {}", reason.info);
                 break;
 
             default:
@@ -62,10 +62,12 @@ namespace {
     void print_help(const std::vector<std::string>& args) {
         if (args.size() == 1) {
             std::cout << R"(Available commands:
-continue - Resume the process
-register - Commands for operating on registers
-help     - Display the help panel
-exit     - Exits the debugger
+breakpoint - Command for operating on breakpoints
+continue   - Resume the process
+register   - Commands for operating on registers
+step       - Step over a single instruction
+help       - Display the help panel
+exit       - Exits the debugger
 )";
         }
         else if (is_prefix(args[1], "register")) {
@@ -74,6 +76,15 @@ exit     - Exits the debugger
             read <register>
             read all
             write <register> <value>
+)";
+        }
+        else if (is_prefix(args[1], "breakpoint")) {
+            std::cout << R"(Available commands:
+            list
+            delete <id>
+            disable <id>
+            enable <id>
+            set <address>
 )";
         }
         else {
@@ -140,7 +151,7 @@ exit     - Exits the debugger
                 if (info.size == 8) {
                     return sdb::parse_vector<8>(text);
                 }
-                else if (info.size == 16) {
+                if (info.size == 16) {
                     return sdb::parse_vector<16>(text);
                 }
             }
@@ -164,7 +175,6 @@ exit     - Exits the debugger
         }
         catch (sdb::error& err) {
             std::cerr << err.what() << '\n';
-            return;
         }
     }
 
@@ -182,6 +192,59 @@ exit     - Exits the debugger
             print_help({ "help", "register" });
     }
 
+
+    void handle_breakpoint_command(sdb::process& process, const std::vector<std::string>& args) {
+        if (args.size() < 2) {
+            print_help({ "help", "breakpoint" });
+            return;
+        }
+
+        const auto& command = args[1];
+
+        if (is_prefix(command, "list")) {
+            if (process.breakpoint_sites().empty()) {
+                std::println("No breakpoints set!");
+                return;
+            }
+
+            std::println("Current breakpoints:");
+            process.breakpoint_sites().for_each([](auto &site) {
+                std::println("{}: address = {:#x}, {}", site.id(), site.address().addr(), site.is_enabled() ? "enabled" : "disabled");
+            });
+            return;
+        }
+
+        if (args.size() < 3) {
+            print_help({ "help", "breakpoint" });
+            return;
+        }
+
+        if (is_prefix(command, "set")) {
+            auto address = sdb::to_integral<std::uint64_t>(args[2], 16);
+
+            if (!address) {
+                std::println(std::cerr, "Breakpoint command expects address in hexadecimal format, prefixed with 0x");
+                return;
+            }
+
+            process.create_breakpoint_site(sdb::virt_addr{*address}).enable();
+            return;
+        }
+
+        auto id = sdb::to_integral<sdb::breakpoint_site::id_type>(args[2]);
+        if (!id) {
+            std::println(std::cerr, "Command expects breakpoint id");
+            return;
+        }
+
+        if (is_prefix(command, "enable"))
+            process.breakpoint_sites().get_by_id(*id).enable();
+        else if (is_prefix(command, "disable"))
+            process.breakpoint_sites().get_by_id(*id).disable();
+        else if (is_prefix(command, "delete"))
+            process.breakpoint_sites().remove_by_id(*id);
+    }
+
     std::unique_ptr<sdb::process> attach(const std::vector<std::string>& args) {
         if (args[0] == "-p")
             return sdb::process::attach(std::stoi(args[1]));
@@ -189,7 +252,7 @@ exit     - Exits the debugger
         return sdb::process::launch(args[0]);
     }
 
-    bool handle_command(const std::unique_ptr<sdb::process>& process, std::string_view line) {
+    void handle_command(const std::unique_ptr<sdb::process>& process, std::string_view line) {
         const auto args = split(line, ' ');
         const auto& command = args[0];
 
@@ -197,59 +260,55 @@ exit     - Exits the debugger
             process->resume();
             auto reason = process->wait_on_signal();
             print_stop_reason(*process, reason);
-            return true;
         }
         else if (is_prefix(command, "help")) {
             print_help(args);
-            return true;
         }
         else if (is_prefix(command, "register")) {
             handle_register_command(*process, args);
-            return true;
         }
-        if (is_prefix(command, "exit"))
-            return false;
-
-        std::println("Unknown command: {}", command);
-        return true;
+        else if (is_prefix(command, "breakpoint")) {
+            handle_breakpoint_command(*process, args);
+        }
+        else if (is_prefix(command, "step")) {
+            auto reason = process->step_instruction();
+            print_stop_reason(*process, reason);
+        }
+        else
+            sdb::error::send(std::format("Unknown command: {}", command));
     }
 
     void main_loop(const std::unique_ptr<sdb::process> &process) {
-        char* line = nullptr;
-        std::println("Started process {} ", process->pid());
+        std::println("Launch process with PID {}", process->pid());
 
-        while ((line = readline("sdb> ")) != nullptr) {
+        while (true) {
+            std::print("sdb> ");
             std::string line_str;
-
-            if (line != ""sv)
-                add_history(line);
-
-            free(line);
-
-            if (history_length > 0)
-                line_str = history_list()[history_length - 1]->line;
+            std::getline(std::cin >> std::ws, line_str);
 
             if (line_str.empty())
                 continue;
 
+            if (is_prefix(line_str, "exit"))
+                break;
+
             try {
-                if (!handle_command(process, line_str))
-                    return;
+                handle_command(process, line_str);
             } catch (const sdb::error& e) {
-                std::println("{}", e.what());
+                std::println(std::cerr, "{}", e.what());
             }
         }
     }
 }
 
 int main(int argc, const char** argv) {
-    std::vector<std::string> arr(argc);
-    for (int i = 0; i < argc; ++i)
-        arr[i] = std::string{ argv[i] };
+    std::vector<std::string> arr(argc - 1);
+    for (int i = 1; i < argc; ++i)
+        arr[i - 1] = std::string{ argv[i] };
 
     try {
         main_loop(attach(arr));
     } catch (const sdb::error& e) {
-        std::println("{}", e.what());
+        std::println(std::cerr, "{}", e.what());
     }
 }

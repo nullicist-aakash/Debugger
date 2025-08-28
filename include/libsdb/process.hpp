@@ -125,6 +125,16 @@ namespace sdb {
          */
         void write_fprs(const user_fpregs_struct& fprs);
 
+        [[nodiscard]] virt_addr get_pc() const {
+            return virt_addr(get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
+        }
+
+        void set_pc(virt_addr addr) {
+            get_registers().write_by_id(register_id::rip, addr.addr());
+        }
+
+        sdb::stop_reason step_instruction();
+
         /**
          * Helper method to create a breakpoint. Throws error in case breakpoint already exists at given address.
          * @param address Assembly address at which we need to create a breakpoint.
@@ -134,7 +144,7 @@ namespace sdb {
 
         template <typename Self>
         auto& breakpoint_sites(this Self&& self) {
-            return std::forward<Self>(self).m_breakpoint_sites;
+            return std::forward<Self>(self).m_breakpoints;
         }
 
         /**

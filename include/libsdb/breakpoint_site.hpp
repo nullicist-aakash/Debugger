@@ -15,7 +15,14 @@ namespace sdb {
         breakpoint_site(const breakpoint_site&) = delete;
         breakpoint_site(breakpoint_site&&) = delete;
 
+        /**
+         * Enables the breakpoint. If it is already enabled, do nothing.
+         */
         void enable();
+
+        /**
+         * Disables the breakpoint, if it is enabled. no-op otherwise.
+         */
         void disable();
 
         [[nodiscard]] id_type id() const noexcept {

@@ -69,11 +69,19 @@ namespace sdb {
                 f(*point);
         }
 
+        [[nodiscard]] constexpr std::size_t size() const noexcept {
+            return m_stoppoints.size();
+        }
+
+        [[nodiscard]] constexpr bool empty() const noexcept {
+            return m_stoppoints.empty();
+        }
+
     private:
         using points_t = std::vector<std::unique_ptr<StopPoint>>;
 
         template <typename Self>
-        typename points_t::iterator find_by_id(this Self&& self, const id_type& id) {
+        auto find_by_id(this Self&& self, const id_type& id) {
             auto begin = std::begin(std::forward<Self>(self).m_stoppoints);
             auto end = std::end(std::forward<Self>(self).m_stoppoints);
 
@@ -83,7 +91,7 @@ namespace sdb {
         }
 
         template <typename Self>
-        typename points_t::iterator find_by_address(this Self&& self, const virt_addr& address) {
+        auto find_by_address(this Self&& self, const virt_addr& address) {
             auto begin = std::begin(std::forward<Self>(self).m_stoppoints);
             auto end = std::end(std::forward<Self>(self).m_stoppoints);
 

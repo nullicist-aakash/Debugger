@@ -3,9 +3,11 @@
 #include <libsdb/pipe.hpp>
 #include <sys/types.h>
 #include <sys/ptrace.h>
+#include <sys/personality.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <format>
+#include <iostream>
 
 sdb::stop_reason::stop_reason(int wait_status) {
     if (WIFEXITED(wait_status)) {
@@ -32,6 +34,7 @@ std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& 
     // If child process, prepare itself for PTRACE before exec, so that it never
     // starts running, and we can do something in debugger before executing it.
     if (pid == 0) {
+        personality(ADDR_NO_RANDOMIZE);
         channel.close_read();
 
         if (stdout_replacement)
@@ -77,6 +80,16 @@ std::unique_ptr<sdb::process> sdb::process::attach(pid_t pid) {
 }
 
 void sdb::process::resume() {
+    // If we stopped on SIGTRAP and PC-1 is breakpoint, then reset the instruction, run one assembly instruction, re-enter breakpoint
+    if (auto pc = get_pc(); m_breakpoints.enabled_stoppoint_at_address(pc)) {
+        auto& bp = m_breakpoints.get_by_address(pc);
+        bp.disable();
+        if (ptrace(PTRACE_SINGLESTEP, m_pid, nullptr, nullptr) < 0)
+            error::send_errno("Failed a single step");
+        wait_on_signal();
+        bp.enable();
+    }
+
     if (ptrace(PTRACE_CONT, m_pid, nullptr, nullptr) < 0)
         error::send_errno("Could not resume");
 
@@ -92,8 +105,13 @@ sdb::stop_reason sdb::process::wait_on_signal() {
     const auto reason = stop_reason(status);
     this->m_state = reason.reason;
 
-    if (m_is_attached && this->m_state == process_state::STOPPED)
+    if (m_is_attached && this->m_state == process_state::STOPPED) {
         read_all_registers();
+        // If we stopped on SIGTRAP and PC-1 is breakpoint, then reset the instruction, run one assembly instruction, re-enter breakpoint
+        if (const auto instruction_start = get_pc() - 1; reason.info == SIGTRAP && m_breakpoints.enabled_stoppoint_at_address(instruction_start)) {
+            set_pc(instruction_start);
+        }
+    }
 
     return reason;
 }
@@ -166,5 +184,26 @@ sdb::breakpoint_site &sdb::process::create_breakpoint_site(const virt_addr& addr
     if (m_breakpoints.contains_address(address))
         error::send(std::format("Breakpoint site already created at address {}", std::to_string(address.addr())));
 
-    return m_breakpoints.push(std::make_unique<breakpoint_site>(*this, address));
+    return m_breakpoints.push(std::unique_ptr<breakpoint_site>(new breakpoint_site { *this, address }));
 }
+
+sdb::stop_reason sdb::process::step_instruction() {
+    // If we stopped on SIGTRAP and PC is breakpoint, then reset the instruction, run one assembly instruction, re-enter breakpoint
+    std::optional<breakpoint_site*> bp_to_enable;
+    if (auto pc = get_pc(); m_breakpoints.enabled_stoppoint_at_address(pc)) {
+        auto& bp = m_breakpoints.get_by_address(pc);
+        bp.disable();
+        bp_to_enable = &bp;
+    }
+
+    if (ptrace(PTRACE_SINGLESTEP, m_pid, nullptr, nullptr) < 0)
+        error::send_errno("Could not single step");
+
+    auto reason = wait_on_signal();
+
+    if (bp_to_enable)
+        bp_to_enable.value()->enable();
+
+    return reason;
+}
+

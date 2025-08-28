@@ -6,6 +6,7 @@ set(TEST_HELPER_TARGETS "")
 foreach(source_file IN LISTS TEST_HELPER_CPP_SOURCES)
     get_filename_component(target_name "${source_file}" NAME_WE)
     add_executable(${target_name} ${source_file})
+    target_compile_options(${target_name} PRIVATE -g -O0 -pie)
     list(APPEND TEST_HELPER_TARGETS ${target_name})
 endforeach()
 
