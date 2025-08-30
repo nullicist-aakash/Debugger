@@ -1,11 +1,12 @@
 #pragma once
 
-#include <cstdint>
+#include <span>
 #include <filesystem>
 #include <optional>
 #include <memory>
 #include <sys/types.h>
 #include <libsdb/registers.hpp>
+#include <libsdb/bit.hpp>
 #include <libsdb/breakpoint_site.hpp>
 #include <libsdb/stoppoint_collection.hpp>
 
@@ -131,6 +132,27 @@ namespace sdb {
 
         void set_pc(virt_addr addr) {
             get_registers().write_by_id(register_id::rip, addr.addr());
+        }
+
+        /**
+         * Method to fetch the specified number of bytes from specified address.
+         * @param address Address to start reading from.
+         * @param amount The number of bytes to read from address.
+         * @return Copy of the relevant memory contents.
+         */
+        std::vector<std::byte> read_memory(virt_addr address, std::size_t amount) const;
+
+        /**
+         * Writes data to specified memory location.
+         * @param address Address to start writing from.
+         * @param data The data to write.
+         */
+        void write_memory(virt_addr address, std::span<const std::byte> data);
+
+        template <class T>
+        T read_memory_as(virt_addr address) const {
+            auto data = read_memory(address, sizeof(T));
+            return sdb::from_bytes_to<T>(data.data());
         }
 
         sdb::stop_reason step_instruction();

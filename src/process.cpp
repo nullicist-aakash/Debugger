@@ -1,7 +1,9 @@
 #include <libsdb/process.hpp>
 #include <libsdb/error.hpp>
 #include <libsdb/pipe.hpp>
+#include <libsdb/bit.hpp>
 #include <sys/types.h>
+#include <sys/uio.h>
 #include <sys/ptrace.h>
 #include <sys/personality.h>
 #include <sys/wait.h>
@@ -207,3 +209,43 @@ sdb::stop_reason sdb::process::step_instruction() {
     return reason;
 }
 
+
+std::vector<std::byte> sdb::process::read_memory(virt_addr address, std::size_t amount) const {
+    std::vector<std::byte> ret(amount);
+    iovec local_desc{ ret.data(), ret.size() };
+
+    std::vector<iovec> remote_descs;
+
+    while (amount > 0) {
+        const auto up_to_next_page = 0x1000 - (address.addr() & 0xfff);
+        const auto chunk_size = std::min(amount, up_to_next_page);
+        remote_descs.push_back({ reinterpret_cast<void*>(address.addr()), chunk_size });
+        amount -= chunk_size;
+        address += chunk_size;
+    }
+
+    if (process_vm_readv(m_pid, &local_desc, 1, remote_descs.data(), remote_descs.size(), 0) < 0)
+        error::send_errno("Could not read process memory");
+
+    return ret;
+}
+
+void sdb::process::write_memory(virt_addr address, std::span<const std::byte> data) {
+    std::size_t written = 0;
+
+    while (written < data.size()) {
+        auto remaining = data.size() - written;
+        std::uint64_t word;
+        if (remaining >= 8)
+            word = sdb::from_bytes_to<std::uint64_t>(data.data() + written);
+        else {
+            auto read = read_memory(address + written, 8);
+            auto word_data = reinterpret_cast<char*>(&word);
+            std::memcpy(word_data, data.data() + written, remaining);
+            std::memcpy(word_data + remaining, read.data() + remaining, 8 - remaining);
+        }
+        if (ptrace(PTRACE_POKEDATA, m_pid, address + written, word) < 0)
+            error::send_errno("Failed to write memory");
+        written += 8;
+    }
+}
