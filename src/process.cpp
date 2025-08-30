@@ -249,3 +249,16 @@ void sdb::process::write_memory(virt_addr address, std::span<const std::byte> da
         written += 8;
     }
 }
+
+std::vector<std::byte> sdb::process::read_memory_without_traps(virt_addr address, std::size_t amount) const {
+    auto memory = read_memory(address, amount);
+
+    for (auto site : m_breakpoints.get_in_region(address, address + amount)) {
+        if (!site->is_enabled()) continue;
+
+        auto offset = site->address() - address.addr();
+
+        memory[offset.addr()] = site->m_saved_data;
+    }
+    return memory;
+}

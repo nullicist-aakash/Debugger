@@ -4,6 +4,7 @@ project("sdb" LANGUAGES CXX ASM)
 
 find_package(PkgConfig REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+find_package(zydis CONFIG REQUIRED)
 
 include(CTest)
 

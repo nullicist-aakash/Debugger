@@ -140,7 +140,15 @@ namespace sdb {
          * @param amount The number of bytes to read from address.
          * @return Copy of the relevant memory contents.
          */
-        std::vector<std::byte> read_memory(virt_addr address, std::size_t amount) const;
+        [[nodiscard]] std::vector<std::byte> read_memory(virt_addr address, std::size_t amount) const;
+
+        /**
+         * Method to fetch the specified number of bytes from specified address. This replaces existing breakpoint instructions with original code.
+         * @param address Address to start reading from.
+         * @param amount The number of bytes to read from address.
+         * @return Copy of the relevant memory contents.
+         */
+        [[nodiscard]] std::vector<std::byte> read_memory_without_traps(virt_addr address, std::size_t amount) const;
 
         /**
          * Writes data to specified memory location.

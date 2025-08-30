@@ -1,5 +1,5 @@
 {
-  "dependencies" : [ "catch2", "libedit", "fmt" ],
+  "dependencies" : [ "catch2", "libedit", "fmt", "zydis" ],
   "version" : "1.0.0",
   "name" : "sdb"
 }

@@ -77,6 +77,16 @@ namespace sdb {
             return m_stoppoints.empty();
         }
 
+        std::vector<StopPoint*> get_in_region(virt_addr low, virt_addr high) const {
+            std::vector<StopPoint*> ret;
+
+            for (auto& site : m_stoppoints)
+                if (site->in_range(low, high))
+                    ret.push_back(&*site);
+
+            return ret;
+        }
+
     private:
         using points_t = std::vector<std::unique_ptr<StopPoint>>;
 

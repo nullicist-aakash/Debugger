@@ -6,6 +6,7 @@
 #include <string_view>
 #include <libsdb/process.hpp>
 #include <libsdb/parse.hpp>
+#include <libsdb/disassembler.hpp>
 #include <libsdb/error.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -39,6 +40,11 @@ namespace {
 }
 
 namespace {
+    void print_disassembly(sdb::process& process, sdb::virt_addr address, std::size_t n_instructions) {
+        for (const auto &[address, text] : sdb::disassembler(process).disassemble(n_instructions, address))
+            std::print("{:#018x}: {}\n", address.addr(), text);
+    }
+
     void print_stop_reason(const sdb::process& process, const sdb::stop_reason& reason) {
         std::print(std::cerr, "Process {} ", process.pid());
         switch (reason.reason) {
@@ -59,16 +65,23 @@ namespace {
         }
     }
 
+    void handle_stop(sdb::process& process, sdb::stop_reason reason) {
+        print_stop_reason(process, reason);
+        if (reason.reason == sdb::process_state::STOPPED)
+            print_disassembly(process, process.get_pc(), 5);
+    }
+
     void print_help(const std::vector<std::string>& args) {
         if (args.size() == 1) {
             std::cout << R"(Available commands:
-breakpoint - Command for operating on breakpoints
-continue   - Resume the process
-memory     - Commands for operating on memory
-register   - Commands for operating on registers
-step       - Step over a single instruction
-help       - Display the help panel
-exit       - Exits the debugger
+breakpoint  - Command for operating on breakpoints
+continue    - Resume the process
+disassemble - Disassemble machine code to assembly
+memory      - Commands for operating on memory
+register    - Commands for operating on registers
+step        - Step over a single instruction
+help        - Display the help panel
+exit        - Exits the debugger
 )";
         }
         else if (is_prefix(args[1], "register")) {
@@ -93,6 +106,12 @@ exit       - Exits the debugger
             read <address>
             read <address> <number of bytes>
             write <address> <bytes>
+)";
+        }
+        else if (is_prefix(args[1], "disassemble")) {
+            std::cerr << R"(Available options:
+-c <number of instructions>
+-a <start address>
 )";
         }
         else {
@@ -307,6 +326,40 @@ exit       - Exits the debugger
         }
     }
 
+    void handle_disassemble_command(sdb::process& process, const std::vector<std::string>& args) {
+        auto address = process.get_pc();
+        std::size_t n_instructions = 5;
+
+        auto it = args.begin() + 1;
+
+        while (it != args.end()) {
+            if (*it == "-a" and it + 1 != args.end()) {
+                ++it;
+
+                const auto opt_addr = sdb::to_integral<std::uint64_t>(*it++, 16);
+                address = sdb::virt_addr { opt_addr.value_or(address.addr()) };
+
+                if (!opt_addr)
+                    sdb::error::send("Invalid address format");
+            }
+            else if (*it == "-c" and it + 1 != args.end()) {
+                ++it;
+
+                const auto opt_n = sdb::to_integral<std::size_t>(*it++);
+                n_instructions = opt_n.value_or(n_instructions);
+
+                if (!opt_n)
+                    sdb::error::send("Invalid instruction count");
+            }
+            else {
+                print_help({ "help", "disassemble" });
+                return;
+            }
+        }
+
+        print_disassembly(process, address, n_instructions);
+    }
+
     std::unique_ptr<sdb::process> attach(const std::vector<std::string>& args) {
         if (args[0] == "-p")
             return sdb::process::attach(std::stoi(args[1]));
@@ -321,7 +374,7 @@ exit       - Exits the debugger
         if (is_prefix(command, "continue")) {
             process->resume();
             auto reason = process->wait_on_signal();
-            print_stop_reason(*process, reason);
+            handle_stop(*process, reason);
         }
         else if (is_prefix(command, "help")) {
             print_help(args);
@@ -334,10 +387,13 @@ exit       - Exits the debugger
         }
         else if (is_prefix(command, "step")) {
             auto reason = process->step_instruction();
-            print_stop_reason(*process, reason);
+            handle_stop(*process, reason);
         }
         else if (is_prefix(command, "memory")) {
             handle_memory_command(*process, args);
+        }
+        else if (is_prefix(command, "disassemble")) {
+            handle_disassemble_command(*process, args);
         }
         else
             sdb::error::send(std::format("Unknown command: {}", command));
