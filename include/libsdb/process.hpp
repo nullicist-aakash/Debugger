@@ -9,6 +9,7 @@
 #include <libsdb/bit.hpp>
 #include <libsdb/breakpoint_site.hpp>
 #include <libsdb/stoppoint_collection.hpp>
+#include <libsdb/watchpoint.hpp>
 
 
 namespace sdb {
@@ -171,13 +172,22 @@ namespace sdb {
          * @return The object instance of the breakpoint.
          */
         breakpoint_site& create_breakpoint_site(const virt_addr& address, bool hardware = false, bool internal = false);
+        watchpoint& create_watchpoint(virt_addr address, stoppoint_mode mode, std::size_t size);
 
         int set_hardware_breakpoint(breakpoint_site::id_type id, virt_addr address);
+        int set_watchpoint(watchpoint::id_type id, virt_addr address, stoppoint_mode mode, std::size_t size);
+
         void clear_hardware_stoppoint(int index);
+
 
         template <typename Self>
         auto& breakpoint_sites(this Self&& self) {
             return std::forward<Self>(self).m_breakpoints;
+        }
+
+        template <typename Self>
+        auto& watchpoints(this Self&& self) {
+            return std::forward<Self>(self).m_watchpoints;
         }
 
         /**
@@ -236,5 +246,7 @@ namespace sdb {
          * List of all breakpoints, enabled or disabled.
          */
         stoppoint_collection<breakpoint_site> m_breakpoints;
+        stoppoint_collection<watchpoint> m_watchpoints;
     };
 }
+
