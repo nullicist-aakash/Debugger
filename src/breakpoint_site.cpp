@@ -12,13 +12,26 @@ namespace {
     }
 }
 
-sdb::breakpoint_site::breakpoint_site(const process &proc, virt_addr addr) : m_process(&proc), m_id(get_next_id()), m_address(addr), m_is_enabled(false), m_saved_data{} {
+sdb::breakpoint_site::breakpoint_site(process &proc, virt_addr addr, bool is_hardware, bool is_internal) :
+    m_process(&proc),
+    m_id(is_internal ? -1 : get_next_id()),
+    m_address(addr),
+    m_is_enabled(false),
+    m_saved_data{},
+    m_is_hardware{is_hardware},
+    m_is_internal{is_internal} {
 
 }
 
 void sdb::breakpoint_site::enable() {
     if (m_is_enabled)
         return;
+
+    if (m_is_hardware) {
+        m_hardware_register_index = m_process->set_hardware_breakpoint(m_id, m_address);
+        m_is_enabled = true;
+        return;
+    }
 
     // Check address validity by fetching the contents at specified address
     errno = 0;
@@ -40,6 +53,13 @@ void sdb::breakpoint_site::enable() {
 void sdb::breakpoint_site::disable() {
     if (!m_is_enabled)
         return;
+
+    if (m_is_hardware) {
+        m_process->clear_hardware_stoppoint(m_hardware_register_index);
+        m_hardware_register_index = -1;
+        m_is_enabled = false;
+        return;
+    }
 
     errno = 0;
     const std::uint64_t data = ptrace(PTRACE_PEEKDATA, m_process->pid(), m_address, nullptr);

@@ -170,7 +170,10 @@ namespace sdb {
          * @param address Assembly address at which we need to create a breakpoint.
          * @return The object instance of the breakpoint.
          */
-        breakpoint_site& create_breakpoint_site(const virt_addr& address);
+        breakpoint_site& create_breakpoint_site(const virt_addr& address, bool hardware = false, bool internal = false);
+
+        int set_hardware_breakpoint(breakpoint_site::id_type id, virt_addr address);
+        void clear_hardware_stoppoint(int index);
 
         template <typename Self>
         auto& breakpoint_sites(this Self&& self) {
@@ -205,6 +208,8 @@ namespace sdb {
          * Helper method to update local copy of all the registers of a process.
          */
         void read_all_registers();
+
+        int set_hardware_stoppoint(virt_addr address, stoppoint_mode mode, std::size_t size);
 
         /**
          * PID of the process.

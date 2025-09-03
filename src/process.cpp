@@ -11,6 +11,35 @@
 #include <format>
 #include <iostream>
 
+namespace {
+    int find_free_stoppoint_register(std::uint64_t control_register) {
+        for (auto i = 0; i < 4; ++i)
+            if ((control_register & (0b11 << (i * 2))) == 0)
+                return i;
+
+        sdb::error::send("No remaining hardware debug registers");
+    }
+
+    std::uint64_t encode_hardware_stoppoint_mode(sdb::stoppoint_mode mode) {
+        switch (mode) {
+            case sdb::stoppoint_mode::WRITE: return 0b01;
+            case sdb::stoppoint_mode::READ_WRITE: return 0b11;
+            case sdb::stoppoint_mode::EXECUTE: return 0b00;
+            default: sdb::error::send("Invalid stoppoint mode");
+        }
+    }
+
+    std::uint64_t encode_hardware_stoppoint_size(std::size_t size) {
+        switch (size) {
+            case 1: return 0b00;
+            case 2: return 0b01;
+            case 4: return 0b11;
+            case 8: return 0b10;
+            default: sdb::error::send("Invalid stoppoint size");
+        }
+    }
+}
+
 sdb::stop_reason::stop_reason(int wait_status) {
     if (WIFEXITED(wait_status)) {
         reason = process_state::EXITED;
@@ -182,11 +211,11 @@ void sdb::process::write_fprs(const user_fpregs_struct& fprs) {
     }
 }
 
-sdb::breakpoint_site &sdb::process::create_breakpoint_site(const virt_addr& address) {
+sdb::breakpoint_site &sdb::process::create_breakpoint_site(const virt_addr& address, bool hardware, bool internal) {
     if (m_breakpoints.contains_address(address))
         error::send(std::format("Breakpoint site already created at address {}", std::to_string(address.addr())));
 
-    return m_breakpoints.push(std::unique_ptr<breakpoint_site>(new breakpoint_site { *this, address }));
+    return m_breakpoints.push(std::unique_ptr<breakpoint_site>(new breakpoint_site { *this, address, hardware, internal }));
 }
 
 sdb::stop_reason sdb::process::step_instruction() {
@@ -254,7 +283,7 @@ std::vector<std::byte> sdb::process::read_memory_without_traps(virt_addr address
     auto memory = read_memory(address, amount);
 
     for (auto site : m_breakpoints.get_in_region(address, address + amount)) {
-        if (!site->is_enabled()) continue;
+        if (!site->is_enabled() || site->is_hardware()) continue;
 
         auto offset = site->address() - address.addr();
 
@@ -262,3 +291,42 @@ std::vector<std::byte> sdb::process::read_memory_without_traps(virt_addr address
     }
     return memory;
 }
+
+int sdb::process::set_hardware_breakpoint(breakpoint_site::id_type id, virt_addr address) {
+    return set_hardware_stoppoint(address, stoppoint_mode::EXECUTE, 1);
+}
+
+int sdb::process::set_hardware_stoppoint(virt_addr address, stoppoint_mode mode, std::size_t size) {
+    auto& regs = get_registers();
+
+    const auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
+    const auto free_space = find_free_stoppoint_register(control);
+
+    const auto id = static_cast<int>(register_id::dr0) + free_space;
+    regs.write_by_id(static_cast<register_id>(id), address.addr());
+
+    const auto mode_flag = encode_hardware_stoppoint_mode(mode);
+    const auto size_flag = encode_hardware_stoppoint_size(size);
+
+    const auto enable_bit = (1 << (free_space * 2));
+    const auto mode_bits = (mode_flag << (free_space * 4 + 16));
+    const auto size_bits = (size_flag << (free_space * 4 + 18));
+    const auto clear_mask = (0b11 << (free_space * 2)) | (0b1111 << (free_space * 4 + 16));
+    auto masked = control & ~clear_mask;
+    masked |= enable_bit | mode_bits | size_bits;
+
+    regs.write_by_id(register_id::dr7, masked);
+    return free_space;
+}
+
+void sdb::process::clear_hardware_stoppoint(int index) {
+    const auto id = static_cast<int>(register_id::dr0) + index;
+    get_registers().write_by_id(static_cast<register_id>(id), 0);
+
+    const auto control = get_registers().read_by_id_as<std::uint64_t>(register_id::dr7);
+    const auto clear_mask = (0b11 << (index * 2)) | (0b1111 << (index * 4 + 16));
+    const auto masked = control & ~clear_mask;
+
+    get_registers().write_by_id(register_id::dr7, masked);
+}
+

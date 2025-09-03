@@ -86,26 +86,27 @@ exit        - Exits the debugger
         }
         else if (is_prefix(args[1], "register")) {
             std::cout << R"(Available commands:
-            read
-            read <register>
-            read all
-            write <register> <value>
+read
+read <register>
+read all
+write <register> <value>
 )";
         }
         else if (is_prefix(args[1], "breakpoint")) {
             std::cout << R"(Available commands:
-            list
-            delete <id>
-            disable <id>
-            enable <id>
-            set <address>
+list
+delete <id>
+disable <id>
+enable <id>
+set <address>
+set <address> -h
 )";
         }
         else if (is_prefix(args[1], "memory")) {
             std::cerr << R"(Available commands:
-            read <address>
-            read <address> <number of bytes>
-            write <address> <bytes>
+read <address>
+read <address> <number of bytes>
+write <address> <bytes>
 )";
         }
         else if (is_prefix(args[1], "disassemble")) {
@@ -236,6 +237,7 @@ exit        - Exits the debugger
 
             std::println("Current breakpoints:");
             process.breakpoint_sites().for_each([](auto &site) {
+                if (site.is_internal()) return;
                 std::println("{}: address = {:#x}, {}", site.id(), site.address().addr(), site.is_enabled() ? "enabled" : "disabled");
             });
             return;
@@ -253,8 +255,15 @@ exit        - Exits the debugger
                 std::println(std::cerr, "Breakpoint command expects address in hexadecimal format, prefixed with 0x");
                 return;
             }
+            bool hardware = false;
 
-            process.create_breakpoint_site(sdb::virt_addr{*address}).enable();
+            if (args.size() == 4)
+                if (args[3] == "-h")
+                    hardware = true;
+                else
+                    sdb::error::send("Invalid breakpoint command argument");
+
+            process.create_breakpoint_site(sdb::virt_addr{*address}, hardware).enable();
             return;
         }
 

@@ -41,14 +41,22 @@ namespace sdb {
             return low <= m_address && m_address < high;
         }
 
+        [[nodiscard]] bool is_hardware() const noexcept { return m_is_hardware; }
+
+        [[nodiscard]] bool is_internal() const noexcept { return m_is_internal; }
+
     private:
-        breakpoint_site(const process& proc, virt_addr addr);
+        breakpoint_site(process& proc, virt_addr addr, bool is_hardware = false, bool is_internal = false);
         friend class process;
 
-        const process* m_process;
+        process* m_process;
         const id_type m_id;
         const virt_addr m_address;
         bool m_is_enabled;
         std::byte m_saved_data;   // The byte in assembly which was replaced by interrupt
+
+        const bool m_is_hardware;
+        const bool m_is_internal;
+        int m_hardware_register_index = -1;
     };
 }
