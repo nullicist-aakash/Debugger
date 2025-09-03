@@ -413,3 +413,35 @@ TEST_CASE("Hardware breakpoint evades memory checksums", "[breakpoint]") {
     x = channel.read();
     REQUIRE(to_string_view(x) == "Putting pineapple on pizza...\n");
 }
+
+TEST_CASE("Watchpoint detects read", "[watchpoint]") {
+    bool close_on_exec = false;
+    sdb::pipe channel(close_on_exec);
+
+    auto proc = process::launch("targets/anti_debugger", true, channel.get_write_fd());
+    channel.close_write();
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    auto func = virt_addr(from_bytes_to<std::uint64_t>(channel.read().data()));
+    auto& watch = proc->create_watchpoint(func, sdb::stoppoint_mode::READ_WRITE, 1);
+    watch.enable();
+
+    proc->resume();
+    proc->wait_on_signal();
+    proc->step_instruction();
+
+    auto& soft = proc->create_breakpoint_site(func, false);
+    soft.enable();
+
+    proc->resume();
+    auto reason = proc->wait_on_signal();
+    REQUIRE(reason.info == SIGTRAP);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    auto x = channel.read();
+    REQUIRE(to_string_view(x) == "Putting pineapple on pizza...\n");
+}

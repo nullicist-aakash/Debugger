@@ -334,11 +334,9 @@ int sdb::process::set_watchpoint(watchpoint::id_type id, virt_addr address, stop
     return set_hardware_stoppoint(address, mode, size);
 }
 
-
 sdb::watchpoint& sdb::process::create_watchpoint(virt_addr address, stoppoint_mode mode, std::size_t size) {
-    if (m_watchpoints.contains_address(address)) {
+    if (m_watchpoints.contains_address(address))
         error::send("Watchpoint already created at address " + std::to_string(address.addr()));
-    }
 
     return m_watchpoints.push(std::unique_ptr<watchpoint>(new watchpoint(*this, address, mode, size)));
 }
