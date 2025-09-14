@@ -1,6 +1,7 @@
 #include <libsdb/watchpoint.hpp>
 #include <libsdb/process.hpp>
 #include <libsdb/error.hpp>
+#include <utility>
 
 namespace {
     auto get_next_id() {
@@ -20,6 +21,8 @@ sdb::watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mod
     // Make sure that address are properly aligned
     if ((address.addr() & (size - 1)) != 0)
         error::send("Watchpoint must be aligned to size");
+
+    update_data();
 }
 
 void sdb::watchpoint::enable() {
@@ -33,4 +36,13 @@ void sdb::watchpoint::disable() {
 
     m_process->clear_hardware_stoppoint(m_hardware_register_index);
     m_is_enabled = false;
+}
+
+
+void sdb::watchpoint::update_data() {
+    std::uint64_t new_data = 0;
+    auto read = m_process->read_memory(m_address, m_size);
+
+    memcpy(&new_data, read.data(), m_size);
+    m_previous_data = std::exchange(m_data, new_data);
 }

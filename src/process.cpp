@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <format>
 #include <iostream>
+#include <bit>
 
 namespace {
     int find_free_stoppoint_register(std::uint64_t control_register) {
@@ -65,6 +66,9 @@ std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& 
     // If child process, prepare itself for PTRACE before exec, so that it never
     // starts running, and we can do something in debugger before executing it.
     if (pid == 0) {
+        if (setpgid(0, 0) < 0)
+            error::exit_with_errno(channel, "setpgid failed");
+
         personality(ADDR_NO_RANDOMIZE);
         channel.close_read();
 
@@ -133,14 +137,20 @@ sdb::stop_reason sdb::process::wait_on_signal() {
     if (waitpid(m_pid, &status, 0) < 0)
         error::send_errno("waitpid failed");
 
-    const auto reason = stop_reason(status);
+    auto reason = stop_reason(status);
     this->m_state = reason.reason;
 
     if (m_is_attached && this->m_state == process_state::STOPPED) {
         read_all_registers();
+        augment_stop_reason(reason);
         // If we stopped on SIGTRAP and PC-1 is breakpoint, then reset the instruction, run one assembly instruction, re-enter breakpoint
-        if (const auto instruction_start = get_pc() - 1; reason.info == SIGTRAP && m_breakpoints.enabled_stoppoint_at_address(instruction_start)) {
-            set_pc(instruction_start);
+        if (const auto instruction_start = get_pc() - 1; reason.info == SIGTRAP) {
+            if (reason.trap_reason == trap_type::SOFTWARE_BREAK && m_breakpoints.enabled_stoppoint_at_address(instruction_start))
+                set_pc(instruction_start);
+            else if (reason.trap_reason == trap_type::HARDWARE_BREAK) {
+                if (auto id = get_current_hardware_stoppoint(); id.index() == 1)
+                    m_watchpoints.get_by_id(std::get<1>(id)).update_data();
+            }
         }
     }
 
@@ -339,4 +349,52 @@ sdb::watchpoint& sdb::process::create_watchpoint(virt_addr address, stoppoint_mo
         error::send("Watchpoint already created at address " + std::to_string(address.addr()));
 
     return m_watchpoints.push(std::unique_ptr<watchpoint>(new watchpoint(*this, address, mode, size)));
+}
+
+
+void sdb::process::augment_stop_reason(sdb::stop_reason& reason) const {
+    siginfo_t info;
+    if (ptrace(PTRACE_GETSIGINFO, m_pid, nullptr, &info) < 0) {
+        error::send_errno("Failed to get signal info");
+    }
+
+    reason.trap_reason = trap_type::UNKNOWN;
+    if (reason.info != SIGTRAP)
+        return;
+
+    switch (info.si_code) {
+        case TRAP_TRACE:
+            reason.trap_reason = trap_type::SINGLE_STEP;
+            break;
+
+        case SI_KERNEL:
+            reason.trap_reason = trap_type::SOFTWARE_BREAK; // x64 uses SI_KERNEL, not TRAP_BRKPT, for software breakpoints
+            break;
+
+        case TRAP_HWBKPT:
+            reason.trap_reason = trap_type::HARDWARE_BREAK;
+            break;
+
+        default:
+            break;
+    }
+}
+
+std::variant<sdb::breakpoint_site::id_type, sdb::watchpoint::id_type> sdb::process::get_current_hardware_stoppoint() const {
+    const auto& regs = get_registers();
+    const auto status = regs.read_by_id_as<std::uint64_t>(register_id::dr6);
+
+    const auto index = std::countr_zero(status);
+    const auto id = static_cast<int>(register_id::dr0) + index;
+
+    const auto addr = virt_addr(regs.read_by_id_as<std::uint64_t>(static_cast<register_id>(id)));
+    using ret = std::variant<sdb::breakpoint_site::id_type, sdb::watchpoint::id_type>;
+
+    if (m_breakpoints.contains_address(addr)) {
+        const auto site_id = m_breakpoints.get_by_address(addr).id();
+        return ret{ std::in_place_index<0>, site_id };
+    }
+
+    const auto watch_id = m_watchpoints.get_by_address(addr).id();
+    return ret{ std::in_place_index<1>, watch_id };
 }

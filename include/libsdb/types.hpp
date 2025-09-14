@@ -63,6 +63,8 @@ namespace sdb {
     };
 
     enum class stoppoint_mode {
-        WRITE, READ_WRITE, EXECUTE
+        WRITE,
+        READ_WRITE,
+        EXECUTE
     };
 }

@@ -18,24 +18,28 @@ namespace sdb {
 
         void disable();
 
-        id_type id() const noexcept { return m_id; }
+        [[nodiscard]] id_type id() const noexcept { return m_id; }
 
-        bool is_enabled() const noexcept { return m_is_enabled; }
+        [[nodiscard]] bool is_enabled() const noexcept { return m_is_enabled; }
 
-        virt_addr address() const noexcept { return m_address; }
+        [[nodiscard]] virt_addr address() const noexcept { return m_address; }
 
-        stoppoint_mode mode() const noexcept { return m_mode; }
+        [[nodiscard]] stoppoint_mode mode() const noexcept { return m_mode; }
 
-        std::size_t size() const noexcept { return m_size; }
+        [[nodiscard]] std::size_t size() const noexcept { return m_size; }
 
-        bool at_address(virt_addr addr) const noexcept {
+        [[nodiscard]] bool at_address(virt_addr addr) const noexcept {
             return m_address == addr;
         }
 
-        bool in_range(virt_addr low, virt_addr high) const noexcept {
+        [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const noexcept {
             return low <= m_address and high > m_address;
         }
 
+        [[nodiscard]] std::uint64_t data() const { return m_data; }
+        [[nodiscard]] std::uint64_t previous_data() const { return m_previous_data; }
+
+        void update_data();
     private:
         friend process;
 
@@ -48,5 +52,8 @@ namespace sdb {
         const std::size_t m_size;
         bool m_is_enabled;
         int m_hardware_register_index = -1;
+
+        std::uint64_t m_data = 0;
+        std::uint64_t m_previous_data = 0;
     };
 }

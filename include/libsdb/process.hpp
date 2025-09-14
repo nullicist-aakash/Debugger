@@ -35,6 +35,13 @@ namespace sdb {
         TERMINATED
     };
 
+    enum class trap_type {
+        SINGLE_STEP,
+        SOFTWARE_BREAK,
+        HARDWARE_BREAK,
+        UNKNOWN
+    };
+
     /**
      * Holds the information for process stop and some information about the stop.
      */
@@ -54,6 +61,11 @@ namespace sdb {
          * Otherwise, this contains the signal which caused the child to stop/terminate.
          */
         std::uint8_t info;
+
+        /**
+         * In case of trap, contains the information for the trap reason.
+         */
+        std::optional<trap_type> trap_reason;
     };
 
 
@@ -196,6 +208,9 @@ namespace sdb {
          */
         [[nodiscard]] auto pid() const { return m_pid; }
 
+
+        [[nodiscard]] std::variant<breakpoint_site::id_type, watchpoint::id_type> get_current_hardware_stoppoint() const;
+
         /**
          * Destructor.
          */
@@ -220,6 +235,8 @@ namespace sdb {
         void read_all_registers();
 
         int set_hardware_stoppoint(virt_addr address, stoppoint_mode mode, std::size_t size);
+
+        void augment_stop_reason(stop_reason& reason) const;
 
         /**
          * PID of the process.

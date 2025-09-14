@@ -3,6 +3,7 @@
 #include <vector>
 #include <print>
 #include <stack>
+#include <csignal>
 #include <string_view>
 #include <libsdb/process.hpp>
 #include <libsdb/parse.hpp>
@@ -12,6 +13,15 @@
 #include <fmt/ranges.h>
 
 using namespace std::string_view_literals;
+using namespace std::string_literals;
+
+namespace {
+    sdb::process* g_sdb_process = nullptr;
+
+    void handle_sigint(int sig) {
+        kill(g_sdb_process->pid(), SIGSTOP);
+    }
+}
 
 namespace {
     std::vector<std::string> split(std::string_view str, char delim) {
@@ -40,6 +50,33 @@ namespace {
 }
 
 namespace {
+    std::string get_sigtrap_info(const sdb::process& process, sdb::stop_reason reason) {
+        if (reason.trap_reason == sdb::trap_type::SOFTWARE_BREAK) {
+            const auto& site = process.breakpoint_sites().get_by_address(process.get_pc());
+            return std::format(" (breakpoint {})", site.id());
+        }
+
+        if (reason.trap_reason == sdb::trap_type::HARDWARE_BREAK) {
+            const auto id = process.get_current_hardware_stoppoint();
+            if (id.index() == 0)
+                return std::format(" (breakpoint {})", std::get<0>(id));
+
+            auto& point = process.watchpoints().get_by_id(std::get<1>(id));
+            std::string message = std::format(" (watchpoint {})", point.id());
+            if (point.data() == point.previous_data())
+                message += std::format("\nValue: {:#x}", point.data());
+            else
+                message += std::format("\nOld value: {:#x}\nNew value: {:#x}", point.previous_data(), point.data());
+
+            return message;
+        }
+
+        if (reason.trap_reason == sdb::trap_type::SINGLE_STEP)
+            return " (single step)";
+
+        return "";
+    }
+
     void print_disassembly(sdb::process& process, sdb::virt_addr address, std::size_t n_instructions) {
         for (const auto &[address, text] : sdb::disassembler(process).disassemble(n_instructions, address))
             std::print("{:#018x}: {}\n", address.addr(), text);
@@ -49,7 +86,7 @@ namespace {
         std::print(std::cerr, "Process {} ", process.pid());
         switch (reason.reason) {
             case sdb::process_state::STOPPED:
-                std::println(std::cerr, "stopped with signal {} at {:#x}", sigabbrev_np(reason.info), process.get_pc().addr());
+                std::println(std::cerr, "stopped with signal {} at {:#x}{}", sigabbrev_np(reason.info), process.get_pc().addr(), reason.info == SIGTRAP ? get_sigtrap_info(process, reason) : ""s);
                 break;
 
             case sdb::process_state::TERMINATED:
@@ -517,6 +554,9 @@ write <address> <bytes>
     }
 
     void main_loop(const std::unique_ptr<sdb::process> &process) {
+        g_sdb_process = process.get();
+        signal(SIGINT, handle_sigint);
+
         std::println("Launch process with PID {}", process->pid());
 
         while (true) {
