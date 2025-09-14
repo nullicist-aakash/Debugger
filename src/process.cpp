@@ -39,6 +39,12 @@ namespace {
             default: sdb::error::send("Invalid stoppoint size");
         }
     }
+
+    void set_ptrace_options(pid_t pid) {
+        if (ptrace(PTRACE_SETOPTIONS, pid, nullptr, PTRACE_O_TRACESYSGOOD) < 0) {
+            sdb::error::send_errno("Failed to set TRACESYSGOOD option");
+        }
+    }
 }
 
 sdb::stop_reason::stop_reason(int wait_status) {
@@ -86,8 +92,10 @@ std::unique_ptr<sdb::process> sdb::process::launch(const std::filesystem::path& 
 
     // Since we started this process, we want to terminate it on debugger end.
     std::unique_ptr<process> _process(new process(pid, true, debug));
-    if (debug)
+    if (debug) {
         _process->wait_on_signal();
+        set_ptrace_options(_process->pid());
+    }
 
     channel.close_write();
     auto data = channel.read();
@@ -111,6 +119,8 @@ std::unique_ptr<sdb::process> sdb::process::attach(pid_t pid) {
     // The process is already running. So on termination, we should not kill it
     std::unique_ptr<process> _process(new process(pid, false, true));
     _process->wait_on_signal();
+    set_ptrace_options(_process->pid());
+
     return _process;
 }
 
@@ -125,7 +135,8 @@ void sdb::process::resume() {
         bp.enable();
     }
 
-    if (ptrace(PTRACE_CONT, m_pid, nullptr, nullptr) < 0)
+    const auto request = m_syscall_catch_policy.get_mode() == syscall_catch_policy::mode::NONE ? PTRACE_CONT : PTRACE_SYSCALL;
+    if (ptrace(request, m_pid, nullptr, nullptr) < 0)
         error::send_errno("Could not resume");
 
     this->m_state = process_state::RUNNING;
@@ -150,6 +161,8 @@ sdb::stop_reason sdb::process::wait_on_signal() {
             else if (reason.trap_reason == trap_type::HARDWARE_BREAK) {
                 if (auto id = get_current_hardware_stoppoint(); id.index() == 1)
                     m_watchpoints.get_by_id(std::get<1>(id)).update_data();
+            } else if (reason.trap_reason == trap_type::SYSCALL) {
+                reason = maybe_resume_from_syscall(reason);
             }
         }
     }
@@ -352,10 +365,39 @@ sdb::watchpoint& sdb::process::create_watchpoint(virt_addr address, stoppoint_mo
 }
 
 
-void sdb::process::augment_stop_reason(sdb::stop_reason& reason) const {
+void sdb::process::augment_stop_reason(sdb::stop_reason& reason) {
     siginfo_t info;
     if (ptrace(PTRACE_GETSIGINFO, m_pid, nullptr, &info) < 0) {
         error::send_errno("Failed to get signal info");
+    }
+
+    if (reason.info == (SIGTRAP | 0x80)) {
+        auto& sys_info = reason.syscall_info.emplace();
+        auto& registers = get_registers();
+
+        if (m_expecting_syscall_exit) {
+            sys_info.entry = false;
+            // System call may change RAX value, so we retrieve the RAX value before system call
+            sys_info.id = registers.read_by_id_as<std::uint64_t>(register_id::orig_rax);
+            sys_info.ret = registers.read_by_id_as<std::uint64_t>(register_id::rax);
+            m_expecting_syscall_exit = false;
+        } else {
+            sys_info.entry = true;
+            sys_info.id = registers.read_by_id_as<std::uint64_t>(register_id::orig_rax);
+            std::array arg_regs = {
+                register_id::rdi, register_id::rsi, register_id::rdx,
+                register_id::r10, register_id::r8, register_id::r9
+            };
+
+            for (auto i = 0; i < 6; ++i)
+                sys_info.args[i] = registers.read_by_id_as<std::uint64_t>(arg_regs[i]);
+
+            m_expecting_syscall_exit = true;
+        }
+
+        reason.info = SIGTRAP;      // Removes the enabled bit
+        reason.trap_reason = trap_type::SYSCALL;
+        return;
     }
 
     reason.trap_reason = trap_type::UNKNOWN;
@@ -397,4 +439,16 @@ std::variant<sdb::breakpoint_site::id_type, sdb::watchpoint::id_type> sdb::proce
 
     const auto watch_id = m_watchpoints.get_by_address(addr).id();
     return ret{ std::in_place_index<1>, watch_id };
+}
+
+sdb::stop_reason sdb::process::maybe_resume_from_syscall(const stop_reason& reason) {
+    if (m_syscall_catch_policy.get_mode() == syscall_catch_policy::mode::SOME) {
+        auto& to_catch = m_syscall_catch_policy.get_to_catch();
+        if (std::find(begin(to_catch), end(to_catch), reason.syscall_info->id) == end(to_catch)) {
+            resume();
+            return wait_on_signal();
+        }
+    }
+
+    return reason;
 }

@@ -39,7 +39,17 @@ namespace sdb {
         SINGLE_STEP,
         SOFTWARE_BREAK,
         HARDWARE_BREAK,
+        SYSCALL,
         UNKNOWN
+    };
+
+    struct syscall_information {
+        std::uint16_t id;
+        bool entry;
+        union {
+            std::array<std::uint64_t, 6> args;
+            std::int64_t ret;
+        };
     };
 
     /**
@@ -66,8 +76,42 @@ namespace sdb {
          * In case of trap, contains the information for the trap reason.
          */
         std::optional<trap_type> trap_reason;
+
+        std::optional<syscall_information> syscall_info;
     };
 
+    class syscall_catch_policy {
+    public:
+        enum mode {
+            NONE,
+            SOME,
+            ALL
+        };
+
+        static syscall_catch_policy catch_all() {
+            return { mode::ALL, {} };
+        }
+
+        static syscall_catch_policy catch_none() {
+            return { mode::NONE, {} };
+        }
+
+        static syscall_catch_policy catch_some(std::vector<int> to_catch) {
+            return { mode::SOME, std::move(to_catch) };
+        }
+
+        [[nodiscard]] mode get_mode() const {
+            return m_mode;
+        }
+
+        [[nodiscard]] const std::vector<int>& get_to_catch() const { return m_to_catch; }
+    private:
+        syscall_catch_policy(mode mode, std::vector<int> to_catch) :
+            m_mode(mode), m_to_catch(std::move(to_catch)) {}
+
+        mode m_mode;
+        std::vector<int> m_to_catch;
+    };
 
     class process {
     public:
@@ -211,6 +255,10 @@ namespace sdb {
 
         [[nodiscard]] std::variant<breakpoint_site::id_type, watchpoint::id_type> get_current_hardware_stoppoint() const;
 
+        void set_syscall_catch_policy(syscall_catch_policy info) {
+            m_syscall_catch_policy = std::move(info);
+        }
+
         /**
          * Destructor.
          */
@@ -236,7 +284,9 @@ namespace sdb {
 
         int set_hardware_stoppoint(virt_addr address, stoppoint_mode mode, std::size_t size);
 
-        void augment_stop_reason(stop_reason& reason) const;
+        void augment_stop_reason(stop_reason& reason);
+
+        sdb::stop_reason maybe_resume_from_syscall(const stop_reason& reason);
 
         /**
          * PID of the process.
@@ -264,6 +314,13 @@ namespace sdb {
          */
         stoppoint_collection<breakpoint_site> m_breakpoints;
         stoppoint_collection<watchpoint> m_watchpoints;
+        syscall_catch_policy m_syscall_catch_policy = syscall_catch_policy::catch_none();
+
+        /**
+         * For syscall, we will receive a signal in both entering time and returning time.
+         * This flag tracks if we expect next signal to be of exiting syscall nature.
+         */
+        bool m_expecting_syscall_exit = false;
     };
 }
 
