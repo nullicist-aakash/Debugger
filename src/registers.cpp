@@ -39,24 +39,24 @@ namespace {
 }
 
 sdb::registers::value sdb::registers::read(const register_info &info) const {
-    auto bytes = to_bytes(m_data) + info.offset;
+    auto bytes = to_bytes(m_data).subspan(info.offset);
     if (info.format == register_format::uint) {
         switch (info.size) {
-            case 1: return from_bytes_to<std::uint8_t>(bytes);
-            case 2: return from_bytes_to<std::uint16_t>(bytes);
-            case 4: return from_bytes_to<std::uint32_t>(bytes);
-            case 8: return from_bytes_to<std::uint64_t>(bytes);
+            case 1: return from_bytes_to<std::uint8_t>(bytes.data());
+            case 2: return from_bytes_to<std::uint16_t>(bytes.data());
+            case 4: return from_bytes_to<std::uint32_t>(bytes.data());
+            case 8: return from_bytes_to<std::uint64_t>(bytes.data());
             default: error::send("Unexpected register size");
         }
     }
     if (info.format == register_format::double_float)
-        return from_bytes_to<double>(bytes);
+        return from_bytes_to<double>(bytes.data());
     if (info.format == register_format::long_double)
-        return from_bytes_to<long double>(bytes);
+        return from_bytes_to<long double>(bytes.data());
     if (info.format == register_format::vector && info.size == 8)
-        return from_bytes_to<byte64>(bytes);
+        return from_bytes_to<byte64>(bytes.data());
 
-    return from_bytes_to<byte128>(bytes);
+    return from_bytes_to<byte128>(bytes.data());
 }
 
 void sdb::registers::write(const register_info &info, const value &val) {
@@ -66,7 +66,7 @@ void sdb::registers::write(const register_info &info, const value &val) {
         if (sizeof(v) <= info.size) {
             auto wide = widen(info, v);
             auto val_bytes = to_bytes(wide);
-            std::copy(val_bytes, val_bytes + info.size, bytes + info.offset);
+            std::copy(val_bytes.data(), val_bytes.subspan(info.size).data(), bytes.subspan(info.offset).data());
         } else {
             error::send("sdb::registers::write called with mismatched register and value sizes");
         }
@@ -76,8 +76,8 @@ void sdb::registers::write(const register_info &info, const value &val) {
         m_proc->write_fprs(m_data.i387);
     } else {
         // Trick to use to write AH, BH, CH, DH registers, as the ptrace API needs an 8-byte aligned address
-        auto aligned_offset =  info.offset & ~0b111;
+        const auto aligned_offset =  info.offset & ~0b111;
         // I am not sure if bytes + aligned_offset can overflow?
-        m_proc->write_user_struct(aligned_offset, from_bytes_to<std::uint64_t>(bytes + aligned_offset));
+        m_proc->write_user_struct(aligned_offset, from_bytes_to<std::uint64_t>(bytes.data() + aligned_offset));
     }
 }

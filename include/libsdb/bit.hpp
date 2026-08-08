@@ -3,14 +3,16 @@
 #include <cstring>
 #include <cstddef>
 #include <vector>
+#include <ranges>
 #include <span>
+#include <bit>
 #include <string_view>
 
 #include <libsdb/types.hpp>
 
 namespace sdb {
-    inline std::string_view to_string_view(std::span<std::byte> data) {
-        return { reinterpret_cast<char*>(data.data()), data.size() };
+    inline std::string_view to_string_view(std::span<const std::byte> data) {
+        return { reinterpret_cast<const char*>(data.data()), data.size() };
     }
 
     /**
@@ -19,7 +21,7 @@ namespace sdb {
      * @param bytes The bytes to convert from.
      * @return The type-casted view of the byte.
      */
-    template <class To>
+    template <typename To> requires std::is_trivially_copyable_v<To>
     To from_bytes_to(const std::byte* bytes) {
         To ret;
         std::memcpy(&ret, bytes, sizeof(To));
@@ -32,9 +34,9 @@ namespace sdb {
      * @param from Instance of From type, which we want to view as bytes.
      * @return The byte representation of the type.
      */
-    template <class From>
-    std::byte* to_bytes(From& from) {
-        return reinterpret_cast<std::byte*>(&from);
+    template <class From> requires std::is_trivially_copyable_v<From>
+    std::span<std::byte, sizeof(From)> to_bytes(From& from) {
+        return std::span<std::byte, sizeof(From)>(reinterpret_cast<std::byte*>(&from), sizeof(From));
     }
 
     /**
@@ -43,9 +45,9 @@ namespace sdb {
      * @param from Instance of From type, which we want to view as bytes.
      * @return The byte representation of the type.
      */
-    template <class From>
-    const std::byte* to_bytes(const From& from) {
-        return reinterpret_cast<const std::byte*>(&from);
+    template <class From> requires std::is_trivially_copyable_v<From>
+    std::span<const std::byte, sizeof(From)> to_bytes(const From& from) {
+        return std::span<const std::byte, sizeof(From)>(reinterpret_cast<const std::byte*>(&from), sizeof(From));
     }
 
     /**
@@ -54,9 +56,8 @@ namespace sdb {
      * @param src Instance of From type, which we want to view as byte64.
      * @return The byte representation of the type.
      */
-    template <class From>
+    template <class From> requires std::is_trivially_copyable_v<From> && (sizeof(From) <= sizeof(byte64))
     byte64 to_byte64(From src) {
-        static_assert(sizeof(From) <= sizeof(byte64), "The original type should be less than or equal to 8 bytes before converting them to byte64");
         byte64 ret{};
         std::memcpy(&ret, &src, sizeof(From));
         return ret;
@@ -68,9 +69,8 @@ namespace sdb {
      * @param src Instance of From type, which we want to view as byte128.
      * @return The byte representation of the type.
      */
-    template <class From>
+    template <class From> requires std::is_trivially_copyable_v<From> && (sizeof(From) <= sizeof(byte128))
     byte128 to_byte128(From src) {
-        static_assert(sizeof(From) <= sizeof(byte128), "The original type should be less than or equal to 16 bytes before converting them to byte128");
         byte128 ret{};
         std::memcpy(&ret, &src, sizeof(From));
         return ret;
