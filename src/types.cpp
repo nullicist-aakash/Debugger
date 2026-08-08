@@ -2,7 +2,7 @@
 #include <libsdb/elf.hpp>
 
 std::optional<sdb::virt_addr> sdb::file_addr::to_virt_addr() const {
-    contract_assert(elf_ != nullptr, "to_virt_addr called on null address");
+    contract_assert(elf_ != nullptr);
 
     if (elf_->get_section_containing_address(*this) == std::nullopt) return std::nullopt;
     return virt_addr { addr_ + elf_->load_bias().addr() };

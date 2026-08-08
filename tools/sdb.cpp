@@ -10,6 +10,7 @@
 #include <libsdb/disassembler.hpp>
 #include <libsdb/error.hpp>
 #include <libsdb/syscalls.hpp>
+#include <libsdb/target.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
@@ -97,30 +98,48 @@ namespace {
             std::print("{:#018x}: {}\n", address.addr(), text);
     }
 
-    void print_stop_reason(const sdb::process& process, const sdb::stop_reason& reason) {
-        std::print(std::cerr, "Process {} ", process.pid());
+    std::string get_signal_stop_reason(const sdb::target& target, sdb::stop_reason reason) {
+        auto& process = target.get_process();
+        std::string message = fmt::format("stopped with signal {} at {:#x}", sigabbrev_np(reason.info), process.get_pc().addr());
+
+        if (
+            const auto func = target.get_elf().get_symbol_containing_address(process.get_pc());
+            func && ELF64_ST_TYPE(func->st_info) == STT_FUNC
+        )
+            message += fmt::format(" ({})", target.get_elf().get_string(func.value().st_name));
+
+        if (reason.info == SIGTRAP)
+            message += get_sigtrap_info(process, reason);
+
+        return message;
+    }
+
+    void print_stop_reason(const sdb::target& target, const sdb::stop_reason& reason) {
+        std::string message;
         switch (reason.reason) {
             case sdb::process_state::STOPPED:
-                std::println(std::cerr, "stopped with signal {} at {:#x}{}", sigabbrev_np(reason.info), process.get_pc().addr(), reason.info == SIGTRAP ? get_sigtrap_info(process, reason) : ""s);
+                message = get_signal_stop_reason(target, reason);
                 break;
 
             case sdb::process_state::TERMINATED:
-                std::println(std::cerr, "terminated with signal {}", sigabbrev_np(reason.info));
+                message = fmt::format("terminated with signal {}", sigabbrev_np(reason.info));
                 break;
 
             case sdb::process_state::EXITED:
-                std::println(std::cerr, "exited with exit status {}", reason.info);
+                message = fmt::format("exited with exit status {}", reason.info);
                 break;
 
             default:
                 break;
         }
+
+        std::println(std::cout, "Process {} {}", target.get_process().pid(), message);
     }
 
-    void handle_stop(sdb::process& process, sdb::stop_reason reason) {
-        print_stop_reason(process, reason);
+    void handle_stop(sdb::target& target, sdb::stop_reason reason) {
+        print_stop_reason(target, reason);
         if (reason.reason == sdb::process_state::STOPPED)
-            print_disassembly(process, process.get_pc(), 5);
+            print_disassembly(target.get_process(), target.get_process().get_pc(), 5);
     }
 
     void print_help(const std::vector<std::string>& args) {
@@ -157,19 +176,19 @@ set <address> -h
 )";
         }
         else if (is_prefix(args[1], "memory")) {
-            std::cerr << R"(Available commands:
+            std::cout << R"(Available commands:
 read <address>
 read <address> <number of bytes>
 write <address> <bytes>
 )";
         }
         else if (is_prefix(args[1], "disassemble")) {
-            std::cerr << R"(Available options:
+            std::cout << R"(Available options:
 -c <number of instructions>
 -a <start address>
 )";
         } else if (is_prefix(args[1], "watchpoint")) {
-            std::cerr << R"(Available commands:
+            std::cout << R"(Available commands:
             list
             delete <id>
             disable <id>
@@ -177,7 +196,7 @@ write <address> <bytes>
             set <address> <write|rw|execute> <size>
 )";
         } else if (is_prefix(args[1], "catchpoint")) {
-            std::cerr << R"(Available commands:
+            std::cout << R"(Available commands:
 syscall
 syscall none
 syscall <list of syscall IDs or names>)";
@@ -218,7 +237,7 @@ syscall <list of syscall IDs or names>)";
                 std::println("{}:\t{}", info.name, std::visit(format, value));
             }
             catch (sdb::error& err) {
-                std::cerr << "No such register\n";
+                std::cout << "No such register\n";
             }
         }
         else {
@@ -269,7 +288,7 @@ syscall <list of syscall IDs or names>)";
             process.get_registers().write(info, value);
         }
         catch (sdb::error& err) {
-            std::cerr << err.what() << '\n';
+            std::cout << err.what() << '\n';
         }
     }
 
@@ -319,7 +338,7 @@ syscall <list of syscall IDs or names>)";
             auto address = sdb::to_integral<std::uint64_t>(args[2], 16);
 
             if (!address) {
-                std::println(std::cerr, "Breakpoint command expects address in hexadecimal format, prefixed with 0x");
+                std::println(std::cout, "Breakpoint command expects address in hexadecimal format, prefixed with 0x");
                 return;
             }
             bool hardware = false;
@@ -336,7 +355,7 @@ syscall <list of syscall IDs or names>)";
 
         auto id = sdb::to_integral<sdb::breakpoint_site::id_type>(args[2]);
         if (!id) {
-            std::println(std::cerr, "Command expects breakpoint id");
+            std::println(std::cout, "Command expects breakpoint id");
             return;
         }
 
@@ -428,7 +447,7 @@ syscall <list of syscall IDs or names>)";
         }
         auto id = sdb::to_integral<sdb::watchpoint::id_type>(args[2]);
         if (!id) {
-            std::cerr << "Command expects watchpoint id";
+            std::cout << "Command expects watchpoint id";
             return;
         }
 
@@ -564,21 +583,22 @@ syscall <list of syscall IDs or names>)";
         }
     }
 
-    std::unique_ptr<sdb::process> attach(const std::vector<std::string>& args) {
+    std::unique_ptr<sdb::target> attach(const std::vector<std::string>& args) {
         if (args[0] == "-p")
-            return sdb::process::attach(std::stoi(args[1]));
+            return sdb::target::attach(std::stoi(args[1]));
 
-        return sdb::process::launch(args[0]);
+        return sdb::target::launch(args[0]);
     }
 
-    void handle_command(const std::unique_ptr<sdb::process>& process, std::string_view line) {
+    void handle_command(const std::unique_ptr<sdb::target>& target, std::string_view line) {
         const auto args = split(line, ' ');
         const auto& command = args[0];
+        auto process = &target->get_process();
 
         if (is_prefix(command, "continue")) {
             process->resume();
             auto reason = process->wait_on_signal();
-            handle_stop(*process, reason);
+            handle_stop(*target, reason);
         }
         else if (is_prefix(command, "help")) {
             print_help(args);
@@ -594,7 +614,7 @@ syscall <list of syscall IDs or names>)";
         }
         else if (is_prefix(command, "step")) {
             auto reason = process->step_instruction();
-            handle_stop(*process, reason);
+            handle_stop(*target, reason);
         }
         else if (is_prefix(command, "memory")) {
             handle_memory_command(*process, args);
@@ -609,11 +629,11 @@ syscall <list of syscall IDs or names>)";
             sdb::error::send(std::format("Unknown command: {}", command));
     }
 
-    void main_loop(const std::unique_ptr<sdb::process> &process) {
-        g_sdb_process = process.get();
+    void main_loop(const std::unique_ptr<sdb::target> &target) {
+        g_sdb_process = &target->get_process();
         signal(SIGINT, handle_sigint);
 
-        std::println("Launch process with PID {}", process->pid());
+        std::println("Launch process with PID {}", target->get_process().pid());
 
         while (true) {
             std::print("sdb> ");
@@ -627,9 +647,9 @@ syscall <list of syscall IDs or names>)";
                 break;
 
             try {
-                handle_command(process, line_str);
+                handle_command(target, line_str);
             } catch (const sdb::error& e) {
-                std::println(std::cerr, "{}", e.what());
+                std::println(std::cout, "{}", e.what());
             }
         }
     }
@@ -643,6 +663,6 @@ int main(int argc, const char** argv) {
     try {
         main_loop(attach(arr));
     } catch (const sdb::error& e) {
-        std::println(std::cerr, "{}", e.what());
+        std::println(std::cout, "{}", e.what());
     }
 }

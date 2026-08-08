@@ -51,6 +51,11 @@ sdb::elf::elf(elf && other_) noexcept {
     this->path = std::move(other_.path);
     this->data_ = std::move(other_.data_);
     this->fd_ = other_.fd_;
+    this->load_bias_ = other_.load_bias_;
+    this->section_map_ = std::move(other_.section_map_);
+    this->symbol_name_map_ = std::move(other_.symbol_name_map_);
+    this->symbol_addr_map_ = std::move(other_.symbol_addr_map_);
+    this->demangled_names = std::move(other_.demangled_names);
 }
 
 sdb::elf& sdb::elf::operator=(elf && other_) noexcept {
@@ -58,6 +63,11 @@ sdb::elf& sdb::elf::operator=(elf && other_) noexcept {
     this->path = std::move(other_.path);
     this->data_ = std::move(other_.data_);
     this->fd_ = other_.fd_;
+    this->load_bias_ = other_.load_bias_;
+    this->section_map_ = std::move(other_.section_map_);
+    this->symbol_name_map_ = std::move(other_.symbol_name_map_);
+    this->symbol_addr_map_ = std::move(other_.symbol_addr_map_);
+    this->demangled_names = std::move(other_.demangled_names);
     return *this;
 }
 

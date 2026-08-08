@@ -11,6 +11,9 @@
 #include <format>
 #include <iostream>
 #include <bit>
+#include <elf.h>
+#include <fstream>
+
 
 namespace {
     int find_free_stoppoint_register(std::uint64_t control_register) {
@@ -451,4 +454,22 @@ sdb::stop_reason sdb::process::maybe_resume_from_syscall(const stop_reason& reas
     }
 
     return reason;
+}
+
+std::unordered_map<std::uint64_t, std::uint64_t> sdb::process::get_auxv() const {
+    const auto path = std::filesystem::path("/proc") / std::to_string(m_pid) / "auxv";
+    std::ifstream stream{ path };
+
+    std::unordered_map<std::uint64_t, std::uint64_t> ret;
+    std::uint64_t id{}, value{};
+    const auto read = [&](auto& info) {
+        stream.read(reinterpret_cast<char*>(&info), sizeof(info));
+    };
+
+    for (read(id); id != AT_NULL; read(id)) {
+        read(value);
+        ret[id] = value;
+    }
+
+    return ret;
 }

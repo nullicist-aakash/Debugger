@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <memory>
+#include <unordered_map>
 #include <sys/types.h>
 #include <libsdb/registers.hpp>
 #include <libsdb/bit.hpp>
@@ -258,6 +259,8 @@ namespace sdb {
         void set_syscall_catch_policy(syscall_catch_policy info) {
             m_syscall_catch_policy = std::move(info);
         }
+
+        [[nodiscard]] std::unordered_map<std::uint64_t, std::uint64_t> get_auxv() const;
 
         /**
          * Destructor.

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <libsdb/process.hpp>
 #include <libsdb/error.hpp>
+#include <libsdb/elf.hpp>
 #include <libsdb/bit.hpp>
 #include <libsdb/syscalls.hpp>
 #include <sys/types.h>
@@ -370,7 +371,7 @@ TEST_CASE("Reading and writing memory works", "[memory]") {
     proc->wait_on_signal();
 
     auto b_pointer = from_bytes_to<std::uint64_t>(channel.read().data());
-    proc->write_memory(virt_addr{ b_pointer }, { to_bytes("Hello, sdb!"), 12 });
+    proc->write_memory(virt_addr{ b_pointer }, to_bytes("Hello, sdb!"));
 
     proc->resume();
     proc->wait_on_signal();
@@ -482,4 +483,22 @@ TEST_CASE("Syscall catchpoints work", "[catchpoint]") {
     REQUIRE(reason.syscall_info->entry == false);
 
     close(dev_null);
+}
+
+TEST_CASE("ELF parser works", "[elf]") {
+    auto path = "targets/hello_sdb";
+    elf elf (path);
+    auto entry = elf.get_header().e_entry;
+    auto sym = elf.get_symbol_at_address(file_addr{ elf, entry });
+    auto name = elf.get_string(sym->st_name);
+    REQUIRE(name == "_start");
+
+    auto syms = elf.get_symbols_by_name("_start");
+    name = elf.get_string(syms.at(0)->st_name);
+    REQUIRE(name == "_start");
+
+    elf.notify_loaded(virt_addr{ 0xcafecafe });
+    sym = elf.get_symbol_at_address(virt_addr{ 0xcafecafe + entry });
+    name = elf.get_string(sym->st_name);
+    REQUIRE(name == "_start");
 }
