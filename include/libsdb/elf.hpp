@@ -3,9 +3,9 @@
 #include <elf.h>
 #include <filesystem>
 #include <unordered_map>
-
-#include "bit.hpp"
-#include "error.hpp"
+#include <map>
+#include <libsdb/error.hpp>
+#include <libsdb/bit.hpp>
 
 namespace sdb {
     struct elf {
@@ -43,20 +43,46 @@ namespace sdb {
             return { reinterpret_cast<const Elf64_Shdr*>(section_header_view.data()), n_sections };
         }
         [[nodiscard]] std::string_view get_section_name(std::size_t shstr_index) const;
-        [[nodiscard]] std::optional<const Elf64_Shdr*> get_section_header(std::string_view name) const;
+        [[nodiscard]] std::optional<const Elf64_Shdr&> get_section_header(std::string_view name) const;
         [[nodiscard]] std::span<const std::byte> get_section_contents(std::string_view name) const;
 
         [[nodiscard]] std::string_view get_string(std::size_t string_index) const;
 
         [[nodiscard]] std::optional<const Elf64_Shdr&> get_section_containing_address(file_addr addr) const;
         [[nodiscard]] std::optional<const Elf64_Shdr&> get_section_containing_address(virt_addr addr) const;
+
+        [[nodiscard]] std::span<const Elf64_Sym> get_symbol_entries() const {
+            const auto symbol_header = get_section_header(".symtab").or_else([this] { return get_section_header(".dynsym"); });
+            if (!symbol_header) return {};
+            const auto section_start_address = symbol_header->sh_offset;
+            const auto entry_count = symbol_header->sh_size / symbol_header->sh_entsize;
+            return { reinterpret_cast<const Elf64_Sym*>(data_.subspan(section_start_address).data()), entry_count };
+        }
+        [[nodiscard]] std::vector<const Elf64_Sym*> get_symbols_by_name(std::string_view name) const;
+        [[nodiscard]] std::optional<const Elf64_Sym&> get_symbol_at_address(file_addr addr) const;
+        [[nodiscard]] std::optional<const Elf64_Sym&> get_symbol_at_address(virt_addr addr) const;
+        [[nodiscard]] std::optional<const Elf64_Sym&> get_symbol_containing_address(file_addr addr) const;
+        [[nodiscard]] std::optional<const Elf64_Sym&> get_symbol_containing_address(virt_addr addr) const;
     private:
-        void build_section_map();
+        void build_section_map();   // Section name to entry
+        void build_symbol_map();    // Address to symbol entry, and symbol name to symbol entry
 
         int fd_;
         std::filesystem::path path;
         std::span<std::byte> data_;
-        std::unordered_map<std::string_view, const Elf64_Shdr*> section_map_;
+
         virt_addr load_bias_;
+
+        std::unordered_map<std::string_view, const Elf64_Shdr*> section_map_;
+
+        struct range_comparator {
+            constexpr bool operator()(const std::pair<file_addr, file_addr>& lhs, const std::pair<file_addr, file_addr>& rhs) const {
+                return lhs.first < rhs.first;
+            }
+        };
+        std::map<std::pair<file_addr, file_addr>, const Elf64_Sym*, range_comparator> symbol_addr_map_;
+
+        std::unordered_multimap<std::string_view, const Elf64_Sym*> symbol_name_map_;
+        std::vector<std::string> demangled_names;
     };
 }
