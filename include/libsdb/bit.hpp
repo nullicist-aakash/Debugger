@@ -22,10 +22,16 @@ namespace sdb {
      * @return The type-casted view of the byte.
      */
     template <typename To> requires std::is_trivially_copyable_v<To>
-    To from_bytes_to(const std::byte* bytes) {
-        To ret;
-        std::memcpy(&ret, bytes, sizeof(To));
-        return ret;
+    constexpr To from_bytes_to(const std::byte* bytes) {
+        if consteval {
+            std::array<std::byte, sizeof(To)> temp;
+            std::copy_n(bytes, sizeof(To), temp.begin());
+            return std::bit_cast<To>(temp);
+        } else {
+            To ret;
+            std::memcpy(&ret, bytes, sizeof(To));
+            return ret;
+        }
     }
 
     /**
